@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.speech.RecognizerIntent
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -18,6 +19,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -28,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -58,6 +61,7 @@ fun NaatApp(viewModel: NaatViewModel) {
     val showAddModal by viewModel.showAddModal.collectAsState()
     val selectedNaat by viewModel.selectedNaat.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
+    val selectedFolder by viewModel.selectedFolder.collectAsState()
     
     // Derived dark/light boolean
     val isSystemDark = isSystemInDarkTheme()
@@ -73,6 +77,20 @@ fun NaatApp(viewModel: NaatViewModel) {
         statusMessage?.let {
             Toast.makeText(context, it, Toast.LENGTH_LONG).show()
             viewModel.clearStatusMessage()
+        }
+    }
+
+    // In-app back navigation: close overlays / inner screens before leaving the app.
+    // Order matches the visual stack: lyrics reader -> add-entry modal -> folder view -> settings tab.
+    // Only when everything is closed does back fall through to the system (and exit).
+    BackHandler(
+        enabled = selectedNaat != null || showAddModal || selectedFolder != null || currentTab != 0
+    ) {
+        when {
+            selectedNaat != null -> viewModel.selectNaat(null)
+            showAddModal -> viewModel.setShowAddModal(false)
+            selectedFolder != null -> viewModel.selectFolder(null)
+            else -> viewModel.selectTab(0)
         }
     }
 
@@ -324,22 +342,41 @@ fun LibraryScreen(viewModel: NaatViewModel) {
                 tint = HighContrastGray,
                 modifier = Modifier.size(20.dp)
             )
-            OutlinedTextField(
+            Spacer(modifier = Modifier.width(12.dp))
+            // BasicTextField is used instead of OutlinedTextField: the M3 text field
+            // enforces a 56.dp minimum height, which clipped the text in this 48.dp
+            // pill. Here we control padding, line height and vertical centering
+            // ourselves so the placeholder/input can never be cut off.
+            BasicTextField(
                 value = searchQuery,
                 onValueChange = { viewModel.setSearchQuery(it) },
-                placeholder = { Text("Search Naats, Poets, Lyrics...", color = HighContrastGray) },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent,
-                    focusedTextColor = MaterialTheme.colorScheme.onBackground,
-                    unfocusedTextColor = MaterialTheme.colorScheme.onBackground,
-                    errorBorderColor = Color.Transparent,
-                    disabledBorderColor = Color.Transparent
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onBackground,
+                    lineHeight = 20.sp
                 ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.onBackground),
                 modifier = Modifier
                     .weight(1f)
+                    .fillMaxHeight()
+                    .wrapContentHeight(Alignment.CenterVertically)
                     .testTag("global_search_input"),
-                singleLine = true
+                decorationBox = { innerTextField ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (searchQuery.isEmpty()) {
+                            Text(
+                                text = "Search Naats, Poets, Lyrics...",
+                                color = HighContrastGray,
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    lineHeight = 20.sp
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        innerTextField()
+                    }
+                }
             )
             IconButton(
                 onClick = {
