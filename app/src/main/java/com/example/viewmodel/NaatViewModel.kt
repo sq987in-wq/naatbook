@@ -75,6 +75,17 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         _showFavoritesOnly.value = !_showFavoritesOnly.value
     }
 
+    fun setFavoritesOnly(enabled: Boolean) {
+        _showFavoritesOnly.value = enabled
+    }
+
+    /** Returns the Library tab to its root view: no folder, no filter, no search text. */
+    fun resetLibraryToHome() {
+        _selectedFolder.value = null
+        _showFavoritesOnly.value = false
+        _searchQuery.value = ""
+    }
+
     // App Preferences
     private val _themeMode = MutableStateFlow(prefs.getString("theme_mode", "system") ?: "system")
     val themeMode: StateFlow<String> = _themeMode.asStateFlow()

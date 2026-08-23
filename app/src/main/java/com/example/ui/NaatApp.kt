@@ -65,6 +65,8 @@ fun NaatApp(viewModel: NaatViewModel) {
     val selectedNaat by viewModel.selectedNaat.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
     val selectedFolder by viewModel.selectedFolder.collectAsState()
+    val favoritesOnly by viewModel.showFavoritesOnly.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
     
     // Derived dark/light boolean
     val isSystemDark = isSystemInDarkTheme()
@@ -83,17 +85,28 @@ fun NaatApp(viewModel: NaatViewModel) {
         }
     }
 
-    // In-app back navigation: close overlays / inner screens before leaving the app.
-    // Order matches the visual stack: lyrics reader -> add-entry modal -> folder view -> settings tab.
-    // Only when everything is closed does back fall through to the system (and exit).
+    // In-app back navigation: every inner layer pops back towards the main
+    // Library home before the app exits. The order mirrors the visual stack
+    // (topmost first):
+    //   add/edit modal -> lyrics reader -> settings tab -> folder view
+    //   -> favorites filter -> search results -> (fall through = exit app)
+    // Favorites and search are included so back never falls through to the
+    // system while a filtered/results view is visible.
     BackHandler(
-        enabled = selectedNaat != null || showAddModal || selectedFolder != null || currentTab != 0
+        enabled = showAddModal || selectedNaat != null || currentTab != 0 ||
+                selectedFolder != null || favoritesOnly || searchQuery.isNotBlank()
     ) {
         when {
-            selectedNaat != null -> viewModel.selectNaat(null)
             showAddModal -> viewModel.setShowAddModal(false)
+            selectedNaat != null -> viewModel.selectNaat(null)
+            currentTab != 0 -> {
+                // Returning from Settings always lands on a clean Library home.
+                viewModel.selectTab(0)
+                viewModel.resetLibraryToHome()
+            }
             selectedFolder != null -> viewModel.selectFolder(null)
-            else -> viewModel.selectTab(0)
+            favoritesOnly -> viewModel.setFavoritesOnly(false)
+            else -> viewModel.setSearchQuery("")
         }
     }
 
@@ -126,19 +139,13 @@ fun NaatApp(viewModel: NaatViewModel) {
                     }
                 }
 
-                // 1. Add New Modal Overlay (Full Screen)
-                AnimatedVisibility(
-                    visible = showAddModal,
-                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-                ) {
-                    AddNaatModal(
-                        viewModel = viewModel,
-                        onClose = { viewModel.setShowAddModal(false) }
-                    )
-                }
+                // Overlay order matters: later composables draw on top, and the
+                // BackHandler pops them in the same order. The reader sits above
+                // the tab content; the add/edit modal sits above everything, so
+                // editing an entry from inside the reader always opens the modal
+                // on top of it (and back closes the modal, re-revealing the reader).
 
-                // 2. Performance Reader Screen (Full Screen Overlay)
+                // 1. Performance Reader Screen (Full Screen Overlay)
                 AnimatedVisibility(
                     visible = selectedNaat != null,
                     enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
@@ -151,6 +158,18 @@ fun NaatApp(viewModel: NaatViewModel) {
                             onClose = { viewModel.selectNaat(null) }
                         )
                     }
+                }
+
+                // 2. Add New / Edit Modal Overlay (Full Screen, topmost layer)
+                AnimatedVisibility(
+                    visible = showAddModal,
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                ) {
+                    AddNaatModal(
+                        viewModel = viewModel,
+                        onClose = { viewModel.setShowAddModal(false) }
+                    )
                 }
             }
         }
@@ -247,7 +266,7 @@ fun NaatBottomNavigation(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
-                        contentDescription = "The Big Add",
+                        contentDescription = "Add new entry",
                         tint = bg,
                         modifier = Modifier.size(28.dp)
                     )
@@ -438,7 +457,14 @@ fun LibraryScreen(viewModel: NaatViewModel) {
                     FilterChip(
                         selected = favoritesOnly,
                         onClick = { viewModel.toggleFavoritesOnly() },
-                        label = { Text("♥ Favorites", fontSize = 11.sp) },
+                        label = { Text("Favorites", fontSize = 11.sp) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = if (favoritesOnly) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        },
                         modifier = Modifier.testTag("favorites_filter_chip")
                     )
                 }
@@ -572,7 +598,7 @@ fun LibraryScreen(viewModel: NaatViewModel) {
                     ) {
                         Text(
                             text = if (favoritesOnly && searchQuery.isBlank()) {
-                                "No favorites yet.\nTap the ♥ on any entry to star it."
+                                "No favorites yet.\nStar any entry with the heart icon to see it here."
                             } else {
                                 "No matches found.\nTry a different title, poet, or lyric phrase."
                             },
@@ -1071,11 +1097,20 @@ fun AddNaatModal(
                                     color = HighContrastGray,
                                     style = MaterialTheme.typography.bodySmall
                                 )
-                                Text(
-                                    text = if (currentEditing.audioType == "recorded") "🎙️ Voice note" else "🎵 Linked audio file",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = if (currentEditing.audioType == "recorded") Icons.Default.Mic else Icons.Default.MusicNote,
+                                        contentDescription = null,
+                                        tint = HighContrastGray,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = if (currentEditing.audioType == "recorded") "Voice note" else "Linked audio file",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
                             }
                             AudioAttachmentPreview(path = attachmentPath, viewModel = viewModel)
                             IconButton(
@@ -1141,10 +1176,11 @@ fun AddNaatModal(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(
-                                text = if (recordingState == RecordingState.RECORDING) "●" else "⏸",
-                                color = if (recordingState == RecordingState.RECORDING) HighContrastRed else HighContrastGray,
-                                style = MaterialTheme.typography.bodySmall
+                            Icon(
+                                imageVector = if (recordingState == RecordingState.RECORDING) Icons.Default.FiberManualRecord else Icons.Default.Pause,
+                                contentDescription = if (recordingState == RecordingState.RECORDING) "Recording in progress" else "Recording paused",
+                                tint = if (recordingState == RecordingState.RECORDING) HighContrastRed else HighContrastGray,
+                                modifier = Modifier.size(14.dp)
                             )
                             Text(
                                 text = formatTime(recordingElapsedMs.toInt()),
@@ -1185,11 +1221,25 @@ fun AddNaatModal(
                                 )
                             }
                         } else {
-                            Text(
-                                text = "✅ Recording ready: ${finishedTake.name}",
-                                color = HighContrastGray,
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Recording ready",
+                                    tint = MaterialTheme.colorScheme.onBackground,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Recording ready: ${finishedTake.name}",
+                                    color = HighContrastGray,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                             Spacer(modifier = Modifier.height(4.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1213,18 +1263,18 @@ fun AddNaatModal(
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text("Discard", color = HighContrastRed)
                                 }
-                                TextButton(
+                                // Icon-only: a text label wrapped badly in this tight row
+                                IconButton(
                                     onClick = { viewModel.startRecording() },
-                                    modifier = Modifier.testTag("rerecord_btn")
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .testTag("rerecord_btn")
                                 ) {
                                     Icon(
-                                        Icons.Default.Mic,
+                                        Icons.Default.Refresh,
                                         contentDescription = "Re-record",
-                                        tint = MaterialTheme.colorScheme.onBackground,
-                                        modifier = Modifier.size(18.dp)
+                                        tint = MaterialTheme.colorScheme.onBackground
                                     )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Re-record")
                                 }
                             }
                         }
@@ -1469,7 +1519,7 @@ fun SettingsScreen(viewModel: NaatViewModel) {
                     value = globalFontSize,
                     onValueChange = { viewModel.setGlobalFontSize(it) },
                     valueRange = 12f..36f,
-                    steps = 22,
+                    steps = 23, // 24 steps total = 12..36 sp in exact 1-sp increments
                     modifier = Modifier.testTag("global_font_slider")
                 )
                 Spacer(modifier = Modifier.height(4.dp))
@@ -1686,14 +1736,25 @@ fun LyricsReaderScreen(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
                     Spacer(modifier = Modifier.height(8.dp))
                     
-                    Text(
-                        text = if (naat.audioType == "recorded") "🎙️ playing Voice Note" else "🎵 playing Linked Audio",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = HighContrastGray,
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        textAlign = TextAlign.Center
-                    )
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (naat.audioType == "recorded") Icons.Default.Mic else Icons.Default.MusicNote,
+                            contentDescription = null,
+                            tint = HighContrastGray,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (naat.audioType == "recorded") "playing Voice Note" else "playing Linked Audio",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = HighContrastGray
+                        )
+                    }
                     
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1772,7 +1833,7 @@ fun LyricsReaderScreen(
                         value = localFontSize,
                         onValueChange = { localFontSize = it },
                         valueRange = 12f..36f,
-                        steps = 22,
+                        steps = 23, // 24 steps total = 12..36 sp in exact 1-sp increments
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -1864,7 +1925,7 @@ fun LyricsReaderScreen(
                             textAlign = TextAlign.Center,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("reader_ lyrics_text")
+                                .testTag("reader_lyrics_text")
                         )
                         // Extra paddings at bottom so user can scroll items beyond view lines
                         Spacer(modifier = Modifier.height(180.dp))
