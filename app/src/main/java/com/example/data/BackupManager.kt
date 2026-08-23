@@ -13,6 +13,23 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
+/**
+ * Resolves a backup entry to a destination below [baseDir]. Absolute paths,
+ * non-ZIP path separators and canonical paths that escape the base directory
+ * are rejected. Keeping this as a pure file-system function makes the Zip Slip
+ * boundary directly testable on the JVM.
+ */
+internal fun safeBackupDestination(baseDir: File, entryName: String): File? {
+    val segments = entryName.split('/')
+    if (
+        entryName.isBlank() || '\\' in entryName || File(entryName).isAbsolute ||
+        segments.any { it.isBlank() || it == "." || it == ".." }
+    ) return null
+    val destination = File(baseDir, entryName)
+    val basePath = baseDir.canonicalFile.path + File.separator
+    return destination.takeIf { it.canonicalFile.path.startsWith(basePath) }
+}
+
 class BackupManager(
     private val context: Context,
     private val repository: NaatRepository
@@ -21,17 +38,6 @@ class BackupManager(
         // Zip safety limits (guard against zip bombs / malicious archives)
         const val MAX_ENTRIES = 10_000
         const val MAX_TOTAL_BYTES = 2L * 1024 * 1024 * 1024 // 2 GB of decompressed data
-    }
-
-    /**
-     * Resolves a zip entry name to a destination file, rejecting any entry
-     * that would escape the app's private files directory (Zip Slip guard).
-     */
-    private fun safeDestination(entryName: String): File? {
-        if (entryName.contains("..")) return null
-        val dest = File(context.filesDir, entryName)
-        val basePath = context.filesDir.canonicalPath + File.separator
-        return if (dest.canonicalPath.startsWith(basePath)) dest else null
     }
 
     suspend fun exportBackup(outputUri: Uri): Result<String> = withContext(Dispatchers.IO) {
@@ -130,7 +136,7 @@ class BackupManager(
                         jsonContent = reader.readText()
                     }
                     name.startsWith("recordings/") || name.startsWith("linked/") -> {
-                        val destFile = safeDestination(name)
+                        val destFile = safeBackupDestination(context.filesDir, name)
                         if (destFile == null) {
                             Log.w("BackupManager", "Skipped unsafe zip entry: $name")
                         } else {

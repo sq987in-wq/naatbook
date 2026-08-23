@@ -23,7 +23,7 @@ abstract class NaatDatabase : RoomDatabase() {
          * disappears. Registering this Migration explicitly is what prevents
          * fallbackToDestructiveMigration from wiping user data on upgrade.
          */
-        private val MIGRATION_1_2 = object : Migration(1, 2) {
+        internal val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("UPDATE naats SET category = 'Naat' WHERE category = 'Hamd-o-Naat'")
                 db.execSQL("UPDATE naats SET category = 'Salam' WHERE category = 'Salam & Qasida'")
