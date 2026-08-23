@@ -40,6 +40,10 @@ class AudioPlayer(private val context: Context) {
     private val _isPreparing = MutableStateFlow(false)
     val isPreparing: StateFlow<Boolean> = _isPreparing.asStateFlow()
 
+    // Observable variant of hasActiveSession() for UI (e.g. the global mini-player).
+    private val _hasActiveSessionFlow = MutableStateFlow(false)
+    val hasActiveSessionFlow: StateFlow<Boolean> = _hasActiveSessionFlow.asStateFlow()
+
     private var progressJob: Job? = null
     private val playerScope = CoroutineScope(Dispatchers.Main + Job())
 
@@ -150,6 +154,7 @@ class AudioPlayer(private val context: Context) {
                         prepared.start()
                         _duration.value = prepared.duration
                         _isPlaying.value = true
+                        _hasActiveSessionFlow.value = true
                         startProgressTracking()
                     } catch (e: Exception) {
                         Log.e(TAG, "start() after prepare failed", e)
@@ -164,6 +169,7 @@ class AudioPlayer(private val context: Context) {
                     Log.e(TAG, "MediaPlayer error: what=$what extra=$extra")
                     _isPreparing.value = false
                     _isPlaying.value = false
+                    _hasActiveSessionFlow.value = false
                     stopProgressTracking()
                     true
                 }
@@ -236,6 +242,7 @@ class AudioPlayer(private val context: Context) {
             _isPlaying.value = false
             _currentPosition.value = 0
             _duration.value = 0
+            _hasActiveSessionFlow.value = false
             stopProgressTracking()
             abandonFocus()
         }

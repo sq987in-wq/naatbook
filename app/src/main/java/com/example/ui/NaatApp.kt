@@ -126,10 +126,15 @@ fun NaatApp(viewModel: NaatViewModel) {
                 Scaffold(
                     bottomBar = {
                         if (selectedNaat == null && !showAddModal) {
-                            NaatBottomNavigation(
-                                currentTab = currentTab,
-                                onTabSelected = { viewModel.selectTab(it) }
-                            )
+                            Column {
+                                // Global mini-player: pinned just above the nav bar
+                                // whenever a listening session is alive.
+                                GlobalMiniPlayer(viewModel = viewModel)
+                                NaatBottomNavigation(
+                                    currentTab = currentTab,
+                                    onTabSelected = { viewModel.selectTab(it) }
+                                )
+                            }
                         }
                     }
                 ) { innerPadding ->
@@ -319,6 +324,84 @@ fun NaatBottomNavigation(
                     fontWeight = if (isSettingsSelected) FontWeight.Bold else FontWeight.Medium,
                     color = if (isSettingsSelected) textAndIconsColor else textAndIconsColor.copy(alpha = 0.5f),
                     letterSpacing = 0.5.sp
+                )
+            }
+        }
+    }
+}
+
+// --- Global Mini-Player: floating transport strip above the bottom nav ---
+@Composable
+fun GlobalMiniPlayer(viewModel: NaatViewModel) {
+    val nowPlaying by viewModel.nowPlaying.collectAsState()
+    val player = viewModel.audioPlayer
+    val hasSession by player.hasActiveSessionFlow.collectAsState()
+    val isPlaying by player.isPlaying.collectAsState()
+
+    val current = nowPlaying
+    if (current == null || !hasSession) return
+
+    val fg = MaterialTheme.colorScheme.onBackground
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("mini_player")
+    ) {
+        // Hairline matching the nav bar's top divider
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(MaterialTheme.colorScheme.outline)
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.background)
+                .clickable { viewModel.openNowPlayingEntry() }
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .testTag("mini_player_row"),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_cat_dome),
+                contentDescription = null,
+                tint = fg,
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = current.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = fg,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("mini_player_title")
+                )
+                if (!current.poet.isNullOrBlank()) {
+                    Text(
+                        text = current.poet,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = HighContrastGray,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            IconButton(
+                onClick = { player.togglePlayPause() },
+                modifier = Modifier
+                    .size(40.dp)
+                    .testTag("mini_player_play_pause")
+            ) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    tint = fg,
+                    modifier = Modifier.size(26.dp)
                 )
             }
         }
@@ -1729,10 +1812,9 @@ fun LyricsReaderScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(
-                    onClick = {
-                        audioPlayer.stop()
-                        onClose()
-                    },
+                    // Closing the reader keeps playback running (MediaSession owns
+                    // the session); the global mini-player takes over control.
+                    onClick = onClose,
                     modifier = Modifier.testTag("close_reader")
                 ) {
                     Icon(
@@ -1828,7 +1910,7 @@ fun LyricsReaderScreen(
                                 } else if (audioPlayer.hasActiveSession()) {
                                     audioPlayer.resume()
                                 } else {
-                                    audioPlayer.play(naat.audioPath!!, title = naat.title, artist = naat.poet)
+                                    viewModel.startEntryPlayback(naat)
                                 }
                             },
                             modifier = Modifier.testTag("reader_play_pause")

@@ -258,6 +258,13 @@ class MediaPlaybackService : Service() {
         stopSelf()
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // App swiped away from recents — retire playback alongside the task
+        PlaybackRegistry.player?.stop()
+        shutdown()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         syncJob?.cancel()
         syncJob = null
