@@ -32,11 +32,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.res.painterResource
+import com.example.R
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -474,15 +476,27 @@ fun LibraryScreen(viewModel: NaatViewModel) {
                 // Taxonomy is defined once in NaatCategories: content types only,
                 // never media formats (the old mixed list had an "Audio Only"
                 // folder; audio attachments now live inside any category).
-                val folderIcons: Map<String, ImageVector> = mapOf(
-                    NaatCategories.NAAT to Icons.Default.Star,
-                    NaatCategories.HAMD to Icons.Default.Book,
-                    NaatCategories.MANQABAT to Icons.Default.Person,
-                    NaatCategories.SALAM to Icons.Default.FavoriteBorder,
-                    NaatCategories.QASIDA to Icons.Default.AutoStories,
-                    NaatCategories.NASHEED to Icons.Default.MusicNote,
-                    NaatCategories.MY_KALAM to Icons.Default.Edit,
-                    NaatCategories.OTHERS to Icons.Default.Folder
+                // Folder glyphs: six hand-crafted vector drawables carrying the
+                // correct symbolism (Kaaba/Gumbad/masjid-skyline/Zulfiqar/ode
+                // scroll/voice waveform); My Kalam & Others keep their approved
+                // stock icons. All painters are tinted onBackground by the card.
+                val kaabaPainter = painterResource(R.drawable.ic_cat_kaaba)
+                val domePainter = painterResource(R.drawable.ic_cat_dome)
+                val skylinePainter = painterResource(R.drawable.ic_cat_skyline)
+                val zulfiqarPainter = painterResource(R.drawable.ic_cat_zulfiqar)
+                val scrollPainter = painterResource(R.drawable.ic_cat_scroll)
+                val wavesPainter = painterResource(R.drawable.ic_cat_waves)
+                val editPainter = rememberVectorPainter(Icons.Default.Edit)
+                val folderStockPainter = rememberVectorPainter(Icons.Default.Folder)
+                val folderIcons: Map<String, Painter> = mapOf(
+                    NaatCategories.NAAT to domePainter,
+                    NaatCategories.HAMD to kaabaPainter,
+                    NaatCategories.MANQABAT to zulfiqarPainter,
+                    NaatCategories.SALAM to skylinePainter,
+                    NaatCategories.QASIDA to scrollPainter,
+                    NaatCategories.NASHEED to wavesPainter,
+                    NaatCategories.MY_KALAM to editPainter,
+                    NaatCategories.OTHERS to folderStockPainter
                 )
 
                 // Grid layout (using nested Rows to avoid nested scrolling parent errors)
@@ -492,7 +506,7 @@ fun LibraryScreen(viewModel: NaatViewModel) {
                         rowFolders.forEachIndexed { index, folder ->
                             FolderSleekCard(
                                 folder = folder,
-                                icon = folderIcons[folder] ?: Icons.Default.Folder,
+                                iconPainter = folderIcons[folder] ?: folderStockPainter,
                                 count = allNaatsList.count { it.category.equals(folder, ignoreCase = true) },
                                 onClick = { viewModel.selectFolder(folder) },
                                 modifier = Modifier.weight(1f)
@@ -703,7 +717,7 @@ fun LibraryScreen(viewModel: NaatViewModel) {
 @Composable
 fun FolderSleekCard(
     folder: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconPainter: Painter,
     count: Int,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -738,7 +752,7 @@ fun FolderSleekCard(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = icon,
+                    painter = iconPainter,
                     contentDescription = folder,
                     tint = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.size(22.dp)
