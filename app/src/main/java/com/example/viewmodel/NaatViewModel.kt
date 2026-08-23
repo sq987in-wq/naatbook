@@ -8,8 +8,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.*
 import com.example.data.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 
@@ -23,6 +25,25 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
     // Audio players & recorders
     private val audioRecorder = AudioRecorder(context)
     val audioPlayer = AudioPlayer(context)
+
+    init {
+        // Housekeeping: delete audio files that lost their database entries
+        // (cancelled attachments, crashes mid-save, failed deletes, ...).
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val referenced = repository.allNaats.first().mapNotNull { it.audioPath }.toSet()
+                listOf(getRecordingsDirectory(), getLinkedDirectory()).forEach { dir ->
+                    dir.listFiles()?.forEach { file ->
+                        if (file.isFile && file.absolutePath !in referenced && file.delete()) {
+                            Log.d("NaatViewModel", "Cleaned orphaned audio file: ${file.name}")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("NaatViewModel", "Orphaned audio cleanup failed", e)
+            }
+        }
+    }
 
     // Preferences & Settings Keys
     private val prefs = context.getSharedPreferences("naat_notebook_prefs", Context.MODE_PRIVATE)
@@ -137,6 +158,10 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startRecording() {
+        // A previously abandoned recording (never attached to an entry) is replaced — delete it
+        _activeRecordingFile.value?.let { old ->
+            if (old.exists()) viewModelScope.launch(Dispatchers.IO) { old.delete() }
+        }
         val timestamp = System.currentTimeMillis()
         val file = File(getRecordingsDirectory(), "record_$timestamp.m4a")
         _activeRecordingFile.value = file
@@ -168,23 +193,37 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         return dir
     }
 
-    fun copyLocalFileToAppStorage(uri: Uri): File? {
+    // Runs on Dispatchers.IO: audio files can be tens of MB, and copying them
+    // on the main thread risks jank/ANRs.
+    suspend fun copyLocalFileToAppStorage(uri: Uri): File? = withContext(Dispatchers.IO) {
+        val fileName = "linked_${System.currentTimeMillis()}_file.mp3"
+        val destFile = File(getLinkedDirectory(), fileName)
         try {
-            val fileName = "linked_${System.currentTimeMillis()}_file.mp3"
-            val destFile = File(getLinkedDirectory(), fileName)
-            val inputStream = context.contentResolver.openInputStream(uri) ?: return null
-            val outputStream = FileOutputStream(destFile)
-            val buffer = ByteArray(1024 * 4)
-            var bytesRead: Int
-            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                outputStream.write(buffer, 0, bytesRead)
+            val input = context.contentResolver.openInputStream(uri)
+            if (input == null) {
+                null
+            } else {
+                input.use { inputStream ->
+                    FileOutputStream(destFile).use { outputStream ->
+                        inputStream.copyTo(outputStream)
+                    }
+                }
+                destFile
             }
-            inputStream.close()
-            outputStream.close()
-            return destFile
         } catch (e: Exception) {
             Log.e("NaatViewModel", "Failed to copy local file", e)
-            return null
+            destFile.delete() // remove any partially copied file
+            null
+        }
+    }
+
+    /** Deletes a file inside the app's private storage (e.g. a removed attachment). */
+    fun deleteOrphanFile(path: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val file = File(path)
+            if (file.absolutePath.startsWith(context.filesDir.absolutePath) && file.exists()) {
+                file.delete()
+            }
         }
     }
 
@@ -197,19 +236,38 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         audioType: String,
         audioPath: String?
     ) {
+        // Always stop the recorder first — previously, saving mid-recording left the
+        // MediaRecorder running with no way to stop it (hot mic + half-written file).
+        audioRecorder.stop()
+        _recordingState.value = RecordingState.IDLE
+
+        // An instantly-stopped recording can be an empty/invalid file; don't attach it.
+        val finalAudioPath = if (audioType == "recorded" && audioPath != null) {
+            val f = File(audioPath)
+            if (f.exists() && f.length() > 0L) audioPath else {
+                f.delete()
+                null
+            }
+        } else {
+            audioPath
+        }
+        val finalAudioType = if (audioType == "recorded" && finalAudioPath == null) "none" else audioType
+
         viewModelScope.launch {
             val naat = NaatEntity(
                 title = title,
                 poet = if (poet.isNullOrBlank()) null else poet,
                 category = category,
                 lyrics = if (lyrics.isNullOrBlank()) null else lyrics,
-                audioType = audioType,
-                audioPath = audioPath,
+                audioType = finalAudioType,
+                audioPath = finalAudioPath,
                 isFavorite = false
             )
             repository.insert(naat)
-            _activeRecordingFile.value = null // reset
-            _showAddModal.value = false
+            // Clear the recording reference BEFORE closing, so the modal cleanup in
+            // setShowAddModal(false) doesn't delete the file we just attached.
+            _activeRecordingFile.value = null
+            setShowAddModal(false)
         }
     }
 

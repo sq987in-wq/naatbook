@@ -17,6 +17,23 @@ class BackupManager(
     private val context: Context,
     private val repository: NaatRepository
 ) {
+    private companion object {
+        // Zip safety limits (guard against zip bombs / malicious archives)
+        const val MAX_ENTRIES = 10_000
+        const val MAX_TOTAL_BYTES = 2L * 1024 * 1024 * 1024 // 2 GB of decompressed data
+    }
+
+    /**
+     * Resolves a zip entry name to a destination file, rejecting any entry
+     * that would escape the app's private files directory (Zip Slip guard).
+     */
+    private fun safeDestination(entryName: String): File? {
+        if (entryName.contains("..")) return null
+        val dest = File(context.filesDir, entryName)
+        val basePath = context.filesDir.canonicalPath + File.separator
+        return if (dest.canonicalPath.startsWith(basePath)) dest else null
+    }
+
     suspend fun exportBackup(outputUri: Uri): Result<String> = withContext(Dispatchers.IO) {
         try {
             val naatsList = repository.allNaats.first()
@@ -100,29 +117,37 @@ class BackupManager(
             val linkedDir = File(context.filesDir, "linked")
             if (!linkedDir.exists()) linkedDir.mkdirs()
 
+            var entryCount = 0
+            var totalExtractedBytes = 0L
             while (entry != null) {
+                if (++entryCount > MAX_ENTRIES) {
+                    throw IOException("Backup archive has too many entries (>$MAX_ENTRIES)")
+                }
                 val name = entry.name
-                if (name == "naatbook_data.json") {
-                    val reader = BufferedReader(InputStreamReader(zis, "UTF-8"))
-                    jsonContent = reader.readText()
-                } else if (name.startsWith("recordings/")) {
-                    val destFile = File(context.filesDir, name)
-                    destFile.parentFile?.mkdirs()
-                    val fos = FileOutputStream(destFile)
-                    var len: Int
-                    while (zis.read(buffer).also { len = it } > 0) {
-                        fos.write(buffer, 0, len)
+                when {
+                    name == "naatbook_data.json" -> {
+                        val reader = BufferedReader(InputStreamReader(zis, "UTF-8"))
+                        jsonContent = reader.readText()
                     }
-                    fos.close()
-                } else if (name.startsWith("linked/")) {
-                    val destFile = File(context.filesDir, name)
-                    destFile.parentFile?.mkdirs()
-                    val fos = FileOutputStream(destFile)
-                    var len: Int
-                    while (zis.read(buffer).also { len = it } > 0) {
-                        fos.write(buffer, 0, len)
+                    name.startsWith("recordings/") || name.startsWith("linked/") -> {
+                        val destFile = safeDestination(name)
+                        if (destFile == null) {
+                            Log.w("BackupManager", "Skipped unsafe zip entry: $name")
+                        } else {
+                            destFile.parentFile?.mkdirs()
+                            FileOutputStream(destFile).use { fos ->
+                                var len: Int
+                                while (zis.read(buffer).also { len = it } > 0) {
+                                    totalExtractedBytes += len
+                                    if (totalExtractedBytes > MAX_TOTAL_BYTES) {
+                                        throw IOException("Backup archive exceeds maximum allowed size")
+                                    }
+                                    fos.write(buffer, 0, len)
+                                }
+                            }
+                        }
                     }
-                    fos.close()
+                    else -> Log.w("BackupManager", "Skipping unexpected zip entry: $name")
                 }
                 zis.closeEntry()
                 entry = zis.nextEntry

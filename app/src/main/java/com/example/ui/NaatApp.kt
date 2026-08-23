@@ -303,6 +303,9 @@ fun LibraryScreen(viewModel: NaatViewModel) {
     val filteredNaats by viewModel.filteredNaats.collectAsState()
     val allNaatsList by viewModel.allNaats.collectAsState()
 
+    // Entry pending deletion - deletions also remove attached audio, so confirm first
+    var deleteCandidate by remember { mutableStateOf<NaatEntity?>(null) }
+
     // Speech-to-Text Voice input launcher
     val speechRecognizerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
@@ -406,6 +409,7 @@ fun LibraryScreen(viewModel: NaatViewModel) {
         Spacer(modifier = Modifier.height(16.dp))
 
         if (selectedFolder == null) {
+            if (searchQuery.isBlank()) {
             // Main Folder System Grid View with Recent entries
             Column(
                 modifier = Modifier
@@ -516,7 +520,7 @@ fun LibraryScreen(viewModel: NaatViewModel) {
                         NaatRowItem(
                             naat = naat,
                             onItemClick = { viewModel.selectNaat(naat) },
-                            onDeleteClick = { viewModel.deleteNaat(naat) },
+                            onDeleteClick = { deleteCandidate = naat },
                             onFavoriteClick = { viewModel.toggleFavorite(naat) }
                         )
                         Spacer(modifier = Modifier.height(8.dp))
@@ -525,6 +529,46 @@ fun LibraryScreen(viewModel: NaatViewModel) {
                 
                 // Content spacing buffer
                 Spacer(modifier = Modifier.height(80.dp))
+            }
+            } else {
+                // Global search results across every folder
+                Text(
+                    text = "RESULTS FOR \"${searchQuery.trim().uppercase()}\"",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = HighContrastGray,
+                    letterSpacing = 1.5.sp,
+                    modifier = Modifier.padding(bottom = 12.dp, start = 4.dp)
+                )
+                if (filteredNaats.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No matches found.\nTry a different title, poet, or lyric phrase.",
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = HighContrastGray
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(filteredNaats) { naat ->
+                            NaatRowItem(
+                                naat = naat,
+                                onItemClick = { viewModel.selectNaat(naat) },
+                                onDeleteClick = { deleteCandidate = naat },
+                                onFavoriteClick = { viewModel.toggleFavorite(naat) }
+                            )
+                        }
+                    }
+                }
             }
         } else {
             // Inside Folder List-View
@@ -576,13 +620,43 @@ fun LibraryScreen(viewModel: NaatViewModel) {
                         NaatRowItem(
                             naat = naat,
                             onItemClick = { viewModel.selectNaat(naat) },
-                            onDeleteClick = { viewModel.deleteNaat(naat) },
+                            onDeleteClick = { deleteCandidate = naat },
                             onFavoriteClick = { viewModel.toggleFavorite(naat) }
                         )
                     }
                 }
             }
         }
+    }
+
+    // Delete confirmation — deletions also remove attached audio files permanently.
+    deleteCandidate?.let { candidate ->
+        AlertDialog(
+            onDismissRequest = { deleteCandidate = null },
+            title = { Text("Delete this entry?") },
+            text = {
+                Text(
+                    "\"${candidate.title}\" will be permanently deleted" +
+                        if (candidate.audioType != "none") " along with its attached audio." else "."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteNaat(candidate)
+                        deleteCandidate = null
+                    },
+                    modifier = Modifier.testTag("confirm_delete_btn")
+                ) {
+                    Text("Delete", color = HighContrastRed)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteCandidate = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
@@ -773,19 +847,26 @@ fun AddNaatModal(
     // Linked local file attachment state
     var linkedFileUriStr by remember { mutableStateOf<String?>(null) }
     var linkedFileName by remember { mutableStateOf<String?>(null) }
+    var isAttachingFile by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     // Audio picker launcher for mp3/m4a devices files
     val audioPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
         onResult = { uri ->
             if (uri != null) {
-                val copiedFile = viewModel.copyLocalFileToAppStorage(uri)
-                if (copiedFile != null) {
-                    linkedFileUriStr = copiedFile.absolutePath
-                    linkedFileName = "Attached file: " + copiedFile.name
-                    Toast.makeText(context, "Audio file attached successfully!", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, "Failed to copy audio attachment", Toast.LENGTH_SHORT).show()
+                isAttachingFile = true
+                scope.launch {
+                    // Copy runs on Dispatchers.IO inside the ViewModel (no UI-thread jank)
+                    val copiedFile = viewModel.copyLocalFileToAppStorage(uri)
+                    isAttachingFile = false
+                    if (copiedFile != null) {
+                        linkedFileUriStr = copiedFile.absolutePath
+                        linkedFileName = "Attached file: " + copiedFile.name
+                        Toast.makeText(context, "Audio file attached successfully!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Failed to copy audio attachment", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
         }
@@ -1024,14 +1105,25 @@ fun AddNaatModal(
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(
                     onClick = { audioPickerLauncher.launch("audio/*") },
+                    enabled = !isAttachingFile,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.onBackground
                     ),
                     modifier = Modifier.testTag("link_external_file_btn")
                 ) {
-                    Icon(Icons.Default.MusicNote, contentDescription = "Link File")
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Browse Local Storage")
+                    if (isAttachingFile) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.background
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Attaching...")
+                    } else {
+                        Icon(Icons.Default.MusicNote, contentDescription = "Link File")
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Browse Local Storage")
+                    }
                 }
 
                 if (!linkedFileName.isNullOrEmpty()) {
@@ -1048,6 +1140,8 @@ fun AddNaatModal(
                             modifier = Modifier.weight(1f)
                         )
                         IconButton(onClick = {
+                            // Also delete the copied file from app storage (no orphans)
+                            linkedFileUriStr?.let { viewModel.deleteOrphanFile(it) }
                             linkedFileUriStr = null
                             linkedFileName = null
                         }) {
