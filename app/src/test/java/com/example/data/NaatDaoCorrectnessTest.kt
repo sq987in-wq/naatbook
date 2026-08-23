@@ -13,7 +13,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [28])
 class NaatDaoCorrectnessTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val database = Room.inMemoryDatabaseBuilder(context, NaatDatabase::class.java)

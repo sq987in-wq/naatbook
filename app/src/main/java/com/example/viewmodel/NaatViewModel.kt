@@ -50,22 +50,8 @@ class NaatViewModel @Inject constructor(
     private val settingsStore: SettingsStore
 ) : ViewModel() {
 
-    private val initialDraft = EditorDraft(
-        active = savedStateHandle["draft.active"] ?: false,
-        editingId = savedStateHandle["draft.editingId"],
-        title = savedStateHandle["draft.title"] ?: "",
-        poet = savedStateHandle["draft.poet"] ?: "",
-        category = savedStateHandle["draft.category"] ?: NaatCategories.DEFAULT,
-        lyrics = savedStateHandle["draft.lyrics"] ?: "",
-        existingAudioRemoved = savedStateHandle["draft.existingAudioRemoved"] ?: false,
-        existingAudioType = savedStateHandle["draft.existingAudioType"] ?: "none",
-        existingAudioPath = savedStateHandle["draft.existingAudioPath"],
-        existingFavorite = savedStateHandle["draft.existingFavorite"] ?: false,
-        existingCreatedAt = savedStateHandle["draft.existingCreatedAt"] ?: 0L,
-        newAttachmentPath = savedStateHandle["draft.newAttachmentPath"],
-        newAttachmentName = savedStateHandle["draft.newAttachmentName"],
-        finishedRecordingPath = savedStateHandle["draft.finishedRecordingPath"]
-    )
+    private val draftStore = EditorDraftStore(savedStateHandle)
+    private val initialDraft = draftStore.restore()
     private val _editorDraft = MutableStateFlow(initialDraft)
     val editorDraft: StateFlow<EditorDraft> = _editorDraft.asStateFlow()
 
@@ -231,21 +217,8 @@ class NaatViewModel @Inject constructor(
 
     private fun persistDraft(draft: EditorDraft) {
         _editorDraft.value = draft
-        savedStateHandle["draft.active"] = draft.active
-        savedStateHandle["draft.editingId"] = draft.editingId
-        savedStateHandle["draft.title"] = draft.title
-        savedStateHandle["draft.poet"] = draft.poet
-        savedStateHandle["draft.category"] = draft.category
         // Exactly one lyrics value is retained; audio bytes are never placed in saved state.
-        savedStateHandle["draft.lyrics"] = draft.lyrics
-        savedStateHandle["draft.existingAudioRemoved"] = draft.existingAudioRemoved
-        savedStateHandle["draft.existingAudioType"] = draft.existingAudioType
-        savedStateHandle["draft.existingAudioPath"] = draft.existingAudioPath
-        savedStateHandle["draft.existingFavorite"] = draft.existingFavorite
-        savedStateHandle["draft.existingCreatedAt"] = draft.existingCreatedAt
-        savedStateHandle["draft.newAttachmentPath"] = draft.newAttachmentPath
-        savedStateHandle["draft.newAttachmentName"] = draft.newAttachmentName
-        savedStateHandle["draft.finishedRecordingPath"] = draft.finishedRecordingPath
+        draftStore.save(draft)
     }
 
     fun updateDraft(transform: (EditorDraft) -> EditorDraft) {

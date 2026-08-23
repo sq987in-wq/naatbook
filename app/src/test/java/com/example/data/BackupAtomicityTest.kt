@@ -25,7 +25,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [28])
 class BackupAtomicityTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val temporary = TemporaryFolder()
@@ -84,6 +84,33 @@ class BackupAtomicityTest {
         assertTrue(repository.allNaats.first().isEmpty())
         assertFalse(File(context.filesDir, "audio").exists())
         assertNoImportStaging()
+    }
+
+    @Test
+    fun `version one absolute audio path restores through staged content address`() = runBlocking {
+        val payload = "legacy audio".toByteArray()
+        val legacyPath = "recordings/legacy.m4a"
+        val legacyEntry = entry("Legacy")
+            .put("audioType", "recorded")
+            .put("audioPath", "/data/user/0/old.app/files/$legacyPath")
+        val legacyDocument = JSONArray().put(legacyEntry)
+        val archive = temporary.newFile("legacy.zip")
+        ZipOutputStream(FileOutputStream(archive)).use { zip ->
+            zip.putNextEntry(ZipEntry("naatbook_data.json"))
+            zip.write(legacyDocument.toString().toByteArray())
+            zip.closeEntry()
+            zip.putNextEntry(ZipEntry(legacyPath))
+            zip.write(payload)
+            zip.closeEntry()
+        }
+
+        val result = manager.importBackup(Uri.fromFile(archive))
+        val restored = repository.allNaats.first().single()
+
+        assertEquals(1, result.getOrThrow())
+        assertEquals("recorded", restored.audioType)
+        assertTrue(restored.audioPath!!.startsWith(File(context.filesDir, "audio").absolutePath))
+        assertTrue(File(restored.audioPath!!).isFile)
     }
 
     @Test

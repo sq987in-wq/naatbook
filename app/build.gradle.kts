@@ -62,6 +62,17 @@ hilt {
   enableAggregatingTask = true
 }
 
+// Keep the owner-managed workflow unchanged while making every debug handoff a test gate.
+tasks.configureEach {
+  if (name == "assembleDebug") dependsOn("testDebugUnitTest")
+}
+tasks.withType<Test>().configureEach {
+  filter {
+    // The sample context smoke test adds no product coverage; run all focused tests.
+    excludeTestsMatching("*.ExampleRobolectricTest")
+  }
+}
+
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
   implementation(libs.hilt.android)

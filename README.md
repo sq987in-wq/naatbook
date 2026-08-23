@@ -18,3 +18,17 @@ The **Android APK Build** workflow (`.github/workflows/build.yml`) builds a debu
 APK on every push to `main`, on pull requests, and on manual dispatch. You can
 download the resulting `naatbook-debug-apk` artifact from any successful
 workflow run, or build it yourself with `./gradlew assembleDebug`.
+
+## Verification
+
+Run the repository verification gate before handing off a P4 build:
+
+```bash
+./scripts/verify-p4.sh
+```
+
+The script runs the focused JVM/Robolectric suite, builds the debug APK, checks
+patch whitespace, and fails if the branch contains changes under
+`.github/workflows/`. Individual tests can be run with
+`./gradlew testDebugUnitTest`; reports are written beneath
+`app/build/reports/tests/testDebugUnitTest/`.
