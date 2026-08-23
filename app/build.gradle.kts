@@ -82,6 +82,7 @@ dependencies {
   implementation(libs.androidx.core.ktx)
   implementation(libs.androidx.core.splashscreen)
   implementation(libs.androidx.datastore.preferences)
+  implementation(libs.androidx.media)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)

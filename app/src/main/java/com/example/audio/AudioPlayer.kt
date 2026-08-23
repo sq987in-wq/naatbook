@@ -22,6 +22,11 @@ import java.io.File
 
 class AudioPlayer(private val context: Context) {
     private var mediaPlayer: MediaPlayer? = null
+
+    init {
+        // Register for the MediaPlaybackService (lock-screen controls)
+        PlaybackRegistry.attach(this)
+    }
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
@@ -108,8 +113,12 @@ class AudioPlayer(private val context: Context) {
     /** True when a media session exists (prepared at least once) and can be resumed. */
     fun hasActiveSession(): Boolean = mediaPlayer != null
 
-    fun play(audioPath: String) {
+    fun play(audioPath: String, title: String? = null, artist: String? = null) {
         stop()
+        // Publish now-playing metadata and raise the MediaSession service so
+        // the lock screen / notification / Bluetooth buttons can control us.
+        PlaybackRegistry.publish(title, artist, audioPath)
+        MediaPlaybackService.start(context)
         val generation = ++playGeneration
         if (!requestFocus()) {
             Log.w(TAG, "Audio focus not granted — playing anyway")
@@ -235,6 +244,7 @@ class AudioPlayer(private val context: Context) {
     /** Full teardown — cancels the coroutine scope. Called from ViewModel.onCleared(). */
     fun release() {
         stop()
+        PlaybackRegistry.clearPlayer(this)
         playerScope.cancel()
     }
 

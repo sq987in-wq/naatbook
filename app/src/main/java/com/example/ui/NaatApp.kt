@@ -1828,7 +1828,7 @@ fun LyricsReaderScreen(
                                 } else if (audioPlayer.hasActiveSession()) {
                                     audioPlayer.resume()
                                 } else {
-                                    audioPlayer.play(naat.audioPath!!)
+                                    audioPlayer.play(naat.audioPath!!, title = naat.title, artist = naat.poet)
                                 }
                             },
                             modifier = Modifier.testTag("reader_play_pause")
