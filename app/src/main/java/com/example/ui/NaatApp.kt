@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.res.painterResource
@@ -44,12 +45,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.audio.RecordingState
 import com.example.data.NaatCategories
 import com.example.data.NaatEntity
 import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.NastaliqFamily
 import com.example.ui.theme.HighContrastRed
 import com.example.ui.theme.HighContrastGray
 import com.example.viewmodel.NaatViewModel
@@ -960,6 +963,24 @@ fun AddNaatModal(
         }
     )
 
+    // Lyrics dictation (voice typing): recognized speech is APPENDED as a new
+    // line below the existing lyrics - dictation never overwrites typed text.
+    val lyricsDictationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+        onResult = { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                val spoken = result.data
+                    ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                    ?.firstOrNull()
+                    ?.trim()
+                    .orEmpty()
+                if (spoken.isNotEmpty()) {
+                    lyrics = if (lyrics.isBlank()) spoken else lyrics.trimEnd() + "\n" + spoken
+                }
+            }
+        }
+    )
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1058,6 +1079,33 @@ fun AddNaatModal(
             value = lyrics,
             onValueChange = { lyrics = it },
             label = { Text("Lyrics Text Area (Optional)") },
+            // Nastaliq the moment the content turns to Urdu/Arabic script
+            textStyle = LocalTextStyle.current.copy(
+                fontFamily = if (usesArabicScript(lyrics)) NastaliqFamily else FontFamily.Default,
+                lineHeight = if (usesArabicScript(lyrics)) 32.sp else LocalTextStyle.current.lineHeight
+            ),
+            trailingIcon = {
+                IconButton(
+                    onClick = {
+                        try {
+                            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                putExtra(RecognizerIntent.EXTRA_PROMPT, "Dictate the kalam...")
+                            }
+                            lyricsDictationLauncher.launch(intent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Speech-to-Text not supported on this device", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.testTag("lyrics_dictate_mic")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Mic,
+                        contentDescription = "Dictate lyrics by voice",
+                        tint = HighContrastGray
+                    )
+                }
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(180.dp)
@@ -1527,16 +1575,19 @@ fun SettingsScreen(viewModel: NaatViewModel) {
                     modifier = Modifier.testTag("global_font_slider")
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                // Sample Display preview
-                Text(
-                    text = "ہمدریافت نعت پاک نمونہ",
-                    fontSize = globalFontSize.sp,
-                    fontFamily = FontFamily.Serif,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp)
-                )
+                // Sample preview — real salam text in authentic Nastaliq + RTL
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                    Text(
+                        text = "اللَّهُمَّ صَلِّ عَلَىٰ مُحَمَّدٍ وَعَلَىٰ آلِ مُحَمَّدٍ",
+                        fontSize = globalFontSize.sp,
+                        fontFamily = NastaliqFamily,
+                        lineHeight = (globalFontSize * 2.0f).sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                    )
+                }
             }
         }
 
@@ -1914,25 +1965,34 @@ fun LyricsReaderScreen(
                         )
                     }
                 } else {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(scrollState)
-                            .padding(horizontal = 4.dp, vertical = 8.dp)
+                    // Urdu/Arabic-script lyrics get the Nastaliq family, an RTL
+                    // paragraph direction and more generous line air; Latin keeps
+                    // the classic Serif look. Centered couplets stay centered.
+                    val urduLyrics = usesArabicScript(naat.lyrics)
+                    CompositionLocalProvider(
+                        LocalLayoutDirection provides
+                                if (urduLyrics) LayoutDirection.Rtl else LayoutDirection.Ltr
                     ) {
-                        Text(
-                            text = naat.lyrics,
-                            fontSize = localFontSize.sp,
-                            fontFamily = FontFamily.Serif,
-                            lineHeight = (localFontSize * 1.6f).sp,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            textAlign = TextAlign.Center,
+                        Column(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("reader_lyrics_text")
-                        )
-                        // Extra paddings at bottom so user can scroll items beyond view lines
-                        Spacer(modifier = Modifier.height(180.dp))
+                                .fillMaxSize()
+                                .verticalScroll(scrollState)
+                                .padding(horizontal = 4.dp, vertical = 8.dp)
+                        ) {
+                            Text(
+                                text = naat.lyrics,
+                                fontSize = localFontSize.sp,
+                                fontFamily = if (urduLyrics) NastaliqFamily else FontFamily.Serif,
+                                lineHeight = (localFontSize * if (urduLyrics) 2.0f else 1.6f).sp,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("reader_lyrics_text")
+                            )
+                            // Extra paddings at bottom so user can scroll items beyond view lines
+                            Spacer(modifier = Modifier.height(180.dp))
+                        }
                     }
                 }
             }
@@ -2018,3 +2078,11 @@ private fun formatTime(ms: Int): String {
     val secs = totalSecs % 60
     return String.format("%02d:%02d", mins, secs)
 }
+
+// Arabic-script detection (Urdu/Persian/Punjabi/Arabic): drives the Nastaliq
+// font selection and RTL layout direction. Anything Latin stays Serif + LTR.
+private val arabicScriptRegex =
+    Regex("[\\u0600-\\u06FF\\u0750-\\u077F\\u08A0-\\u08FF\\uFB50-\\uFDFF\\uFE70-\\uFEFF]")
+
+private fun usesArabicScript(text: String?): Boolean =
+    !text.isNullOrEmpty() && arabicScriptRegex.containsMatchIn(text)
