@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -44,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.audio.RecordingState
+import com.example.data.NaatCategories
 import com.example.data.NaatEntity
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.HighContrastRed
@@ -469,62 +471,44 @@ fun LibraryScreen(viewModel: NaatViewModel) {
                     )
                 }
                 
-                val foldersList = listOf(
-                    "Hamd-o-Naat" to Icons.Default.AutoStories,
-                    "Manqabat" to Icons.Default.Book,
-                    "Salam & Qasida" to Icons.Default.Favorite,
-                    "My Own Poetry" to Icons.Default.Edit,
-                    "Audio Only" to Icons.Default.Mic
+                // Taxonomy is defined once in NaatCategories: content types only,
+                // never media formats (the old mixed list had an "Audio Only"
+                // folder; audio attachments now live inside any category).
+                val folderIcons: Map<String, ImageVector> = mapOf(
+                    NaatCategories.NAAT to Icons.Default.Star,
+                    NaatCategories.HAMD to Icons.Default.Book,
+                    NaatCategories.MANQABAT to Icons.Default.Person,
+                    NaatCategories.SALAM to Icons.Default.FavoriteBorder,
+                    NaatCategories.QASIDA to Icons.Default.AutoStories,
+                    NaatCategories.NASHEED to Icons.Default.MusicNote,
+                    NaatCategories.MY_KALAM to Icons.Default.Edit,
+                    NaatCategories.OTHERS to Icons.Default.Folder
                 )
 
                 // Grid layout (using nested Rows to avoid nested scrolling parent errors)
-                // Row 1
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    FolderSleekCard(
-                        folder = foldersList[0].first,
-                        icon = foldersList[0].second,
-                        count = allNaatsList.count { it.category.equals(foldersList[0].first, ignoreCase = true) },
-                        onClick = { viewModel.selectFolder(foldersList[0].first) },
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    FolderSleekCard(
-                        folder = foldersList[1].first,
-                        icon = foldersList[1].second,
-                        count = allNaatsList.count { it.category.equals(foldersList[1].first, ignoreCase = true) },
-                        onClick = { viewModel.selectFolder(foldersList[1].first) },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                // Row 2
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    FolderSleekCard(
-                        folder = foldersList[2].first,
-                        icon = foldersList[2].second,
-                        count = allNaatsList.count { it.category.equals(foldersList[2].first, ignoreCase = true) },
-                        onClick = { viewModel.selectFolder(foldersList[2].first) },
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    FolderSleekCard(
-                        folder = foldersList[3].first,
-                        icon = foldersList[3].second,
-                        count = allNaatsList.count { it.category.equals(foldersList[3].first, ignoreCase = true) },
-                        onClick = { viewModel.selectFolder(foldersList[3].first) },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                // Row 3 (Audio only occupies half column so it matches perfectly)
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    FolderSleekCard(
-                        folder = foldersList[4].first,
-                        icon = foldersList[4].second,
-                        count = allNaatsList.count { it.category.equals(foldersList[4].first, ignoreCase = true) },
-                        onClick = { viewModel.selectFolder(foldersList[4].first) },
-                        modifier = Modifier.fillMaxWidth(0.5f)
-                    )
+                val folderRows = NaatCategories.ALL.chunked(2)
+                folderRows.forEachIndexed { rowIndex, rowFolders ->
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        rowFolders.forEachIndexed { index, folder ->
+                            FolderSleekCard(
+                                folder = folder,
+                                icon = folderIcons[folder] ?: Icons.Default.Folder,
+                                count = allNaatsList.count { it.category.equals(folder, ignoreCase = true) },
+                                onClick = { viewModel.selectFolder(folder) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (index < rowFolders.lastIndex) {
+                                Spacer(modifier = Modifier.width(12.dp))
+                            }
+                        }
+                        // Keep the grid rectangular if the taxonomy ever gains an odd count
+                        if (rowFolders.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                    if (rowIndex < folderRows.lastIndex) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
                 }
 
                 // Recent entries list representing "Recent Notebooks" in the mockup HTML
@@ -659,7 +643,7 @@ fun LibraryScreen(viewModel: NaatViewModel) {
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No entries in this folder yet.\nTap (+) below to add your first Naat!",
+                        text = "No entries in this folder yet.\nTap (+) below to add your first entry!",
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.bodyMedium,
                         color = HighContrastGray
@@ -905,7 +889,13 @@ fun AddNaatModal(
 
     var title by remember { mutableStateOf(editingNaat?.title ?: "") }
     var poet by remember { mutableStateOf(editingNaat?.poet ?: "") }
-    var selectedCategory by remember { mutableStateOf(editingNaat?.category ?: "Hamd-o-Naat") }
+    // Category prefill: normalized defensively so a legacy label (or a blank)
+    // can never end up pre-selected outside the current taxonomy.
+    var selectedCategory by remember {
+        mutableStateOf(
+            editingNaat?.category?.let { NaatCategories.normalize(it) } ?: NaatCategories.DEFAULT
+        )
+    }
     var lyrics by remember { mutableStateOf(editingNaat?.lyrics ?: "") }
     var existingAudioRemoved by remember { mutableStateOf(false) }
 
@@ -1036,7 +1026,7 @@ fun AddNaatModal(
                 expanded = showCategoryDropdown,
                 onDismissRequest = { showCategoryDropdown = false }
             ) {
-                listOf("Hamd-o-Naat", "Manqabat", "Salam & Qasida", "My Own Poetry", "Audio Only").forEach { cat ->
+                NaatCategories.ALL.forEach { cat ->
                     DropdownMenuItem(
                         text = { Text(cat) },
                         onClick = {

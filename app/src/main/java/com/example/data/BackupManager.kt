@@ -167,7 +167,9 @@ class BackupManager(
                 val naat = NaatEntity(
                     title = obj.getString("title"),
                     poet = if (obj.isNull("poet") || obj.getString("poet").isEmpty()) null else obj.getString("poet"),
-                    category = obj.getString("category"),
+                    // Old backups may carry legacy folder names; upgrade them
+                    // onto the current taxonomy on the way in.
+                    category = NaatCategories.normalize(obj.getString("category")),
                     lyrics = if (obj.isNull("lyrics") || obj.getString("lyrics").isEmpty()) null else obj.getString("lyrics"),
                     audioType = obj.getString("audioType"),
                     audioPath = if (obj.isNull("audioPath") || obj.getString("audioPath").isEmpty()) null else obj.getString("audioPath"),
