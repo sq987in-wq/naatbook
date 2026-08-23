@@ -1562,14 +1562,20 @@ fun SettingsScreen(viewModel: NaatViewModel) {
             shape = RoundedCornerShape(8.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
+                // Drag updates a LOCAL pending value (label & preview follow
+                // live); the DataStore write fires exactly once, on release.
+                // Committing on every tick was a disk write-storm per drag.
+                var pendingFontSize by remember { mutableFloatStateOf(globalFontSize) }
+                LaunchedEffect(globalFontSize) { pendingFontSize = globalFontSize }
                 Text(
-                    text = "Lyrics Default Text Size: ${globalFontSize.toInt()} sp",
+                    text = "Lyrics Default Text Size: ${pendingFontSize.toInt()} sp",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Slider(
-                    value = globalFontSize,
-                    onValueChange = { viewModel.setGlobalFontSize(it) },
+                    value = pendingFontSize,
+                    onValueChange = { pendingFontSize = it },
+                    onValueChangeFinished = { viewModel.setGlobalFontSize(pendingFontSize) },
                     valueRange = 12f..36f,
                     steps = 23, // 24 steps total = 12..36 sp in exact 1-sp increments
                     modifier = Modifier.testTag("global_font_slider")
@@ -1579,9 +1585,9 @@ fun SettingsScreen(viewModel: NaatViewModel) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                     Text(
                         text = "اللَّهُمَّ صَلِّ عَلَىٰ مُحَمَّدٍ وَعَلَىٰ آلِ مُحَمَّدٍ",
-                        fontSize = globalFontSize.sp,
+                        fontSize = pendingFontSize.sp,
                         fontFamily = NastaliqFamily,
-                        lineHeight = (globalFontSize * 2.0f).sp,
+                        lineHeight = (pendingFontSize * 2.0f).sp,
                         textAlign = TextAlign.Center,
                         modifier = Modifier
                             .fillMaxWidth()

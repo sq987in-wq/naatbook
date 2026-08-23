@@ -48,8 +48,8 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Preferences & Settings Keys
-    private val prefs = context.getSharedPreferences("naat_notebook_prefs", Context.MODE_PRIVATE)
+    // Preferences & Settings (DataStore-backed; legacy SharedPreferences migrate in once)
+    private val settingsStore = SettingsStore(context)
 
     // UI Navigation Screen State
     private val _currentTab = MutableStateFlow(0) // 0: Library, 1: Add (via modal), 2: Settings
@@ -86,12 +86,18 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         _searchQuery.value = ""
     }
 
-    // App Preferences
-    private val _themeMode = MutableStateFlow(prefs.getString("theme_mode", "system") ?: "system")
+    // App Preferences (defaults render instantly; stored values land on first emit)
+    private val _themeMode = MutableStateFlow(NaatViewModelDefaults.DEFAULT_THEME_MODE)
     val themeMode: StateFlow<String> = _themeMode.asStateFlow()
 
-    private val _globalFontSize = MutableStateFlow(prefs.getFloat("font_size", 18f))
+    private val _globalFontSize = MutableStateFlow(NaatViewModelDefaults.DEFAULT_FONT_SIZE)
     val globalFontSize: StateFlow<Float> = _globalFontSize.asStateFlow()
+
+    init {
+        // DataStore emits current settings once, then on every change
+        viewModelScope.launch { settingsStore.themeMode.collect { _themeMode.value = it } }
+        viewModelScope.launch { settingsStore.fontSize.collect { _globalFontSize.value = it } }
+    }
 
     // List of cataloged naats
     val allNaats: StateFlow<List<NaatEntity>> = repository.allNaats
@@ -446,15 +452,16 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // --- Preferences configuration ---
+    // --- Preferences configuration (suspend writes -> exactly one DataStore
+    // transaction per committed user action, never per slider tick) ---
     fun setThemeMode(mode: String) {
-        prefs.edit().putString("theme_mode", mode).apply()
         _themeMode.value = mode
+        viewModelScope.launch { settingsStore.setThemeMode(mode) }
     }
 
     fun setGlobalFontSize(size: Float) {
-        prefs.edit().putFloat("font_size", size).apply()
         _globalFontSize.value = size
+        viewModelScope.launch { settingsStore.setFontSize(size) }
     }
 
     fun clearStatusMessage() {
