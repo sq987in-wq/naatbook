@@ -49,6 +49,7 @@ import com.example.ui.theme.HighContrastGray
 import com.example.viewmodel.NaatViewModel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
