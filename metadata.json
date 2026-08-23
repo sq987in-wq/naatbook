@@ -1,0 +1,6 @@
+{
+  "name": "My Naat Notebook",
+  "description": "Offline-first privacy-focused personal diary and voice recorder to write, read, and record Naat, Hamd, and lyrics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
