@@ -70,7 +70,7 @@ fun AddNaatModal(
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
-    
+
     // Edit mode: fields are pre-filled from the entry being edited (null = add new)
     val editingNaat by viewModel.editingNaat.collectAsState()
 
@@ -87,12 +87,12 @@ fun AddNaatModal(
     var existingAudioRemoved by remember { mutableStateOf(false) }
 
     var showCategoryDropdown by remember { mutableStateOf(false) }
-    
+
     val recordingState by viewModel.recordingState.collectAsState()
     val activeRecordingFile by viewModel.activeRecordingFile.collectAsState()
     val recordingElapsedMs by viewModel.recordingElapsedMs.collectAsState()
     val recordingAmplitude by viewModel.recordingAmplitude.collectAsState()
-    
+
     // Linked local file attachment state
     var linkedFileUriStr by remember { mutableStateOf<String?>(null) }
     var linkedFileName by remember { mutableStateOf<String?>(null) }
@@ -630,7 +630,7 @@ fun AddNaatModal(
                 fontSize = 16.sp
             )
         }
-        
+
         Spacer(modifier = Modifier.height(24.dp))
     }
 }

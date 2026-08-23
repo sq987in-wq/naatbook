@@ -82,15 +82,15 @@ fun LyricsReaderScreen(
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
-    
+
     // Auto-Scroll engine configurations
     var autoScrollActive by remember { mutableStateOf(false) }
     var scrollSpeed by remember { mutableFloatStateOf(1f) } // Speed multiplier mapping
-    
+
     // Sizing controls
     val defaultFontSize by viewModel.globalFontSize.collectAsState()
     var localFontSize by remember { mutableStateOf(defaultFontSize) }
-    
+
     // Player controls are scoped to this entry; a modal preview or another
     // entry can never drive this reader's transport UI.
     val playbackController = viewModel.playbackController
@@ -202,7 +202,7 @@ fun LyricsReaderScreen(
                 ) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
                     Spacer(modifier = Modifier.height(8.dp))
-                    
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.Center,
@@ -222,7 +222,7 @@ fun LyricsReaderScreen(
                             color = HighContrastGray
                         )
                     }
-                    
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -411,4 +411,3 @@ fun LyricsReaderScreen(
         }
     }
 }
-

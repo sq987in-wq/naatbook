@@ -36,7 +36,11 @@ class NaatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val referenced = repository.allNaats.first().mapNotNull { it.audioPath }.toSet()
-                listOf(getRecordingsDirectory(), getLinkedDirectory()).forEach { dir ->
+                listOf(
+                    getRecordingsDirectory(),
+                    getLinkedDirectory(),
+                    getImportedAudioDirectory()
+                ).forEach { dir ->
                     dir.listFiles()?.forEach { file ->
                         if (file.isFile && file.absolutePath !in referenced && file.delete()) {
                             Log.d("NaatViewModel", "Cleaned orphaned audio file: ${file.name}")
@@ -307,6 +311,14 @@ class NaatViewModel @Inject constructor(
         return dir
     }
 
+    private fun getImportedAudioDirectory(): File {
+        val dir = File(context.filesDir, "audio")
+        if (!dir.exists()) {
+            dir.mkdirs()
+        }
+        return dir
+    }
+
     // Runs on Dispatchers.IO: audio files can be tens of MB, and copying them
     // on the main thread risks jank/ANRs.
     suspend fun copyLocalFileToAppStorage(uri: Uri): File? = withContext(Dispatchers.IO) {
@@ -331,13 +343,17 @@ class NaatViewModel @Inject constructor(
         }
     }
 
-    /** Deletes a file inside the app's private storage (e.g. a removed attachment). */
+    /** Deletes an app-owned file only when no database entry still references it. */
     fun deleteOrphanFile(path: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val file = File(path)
-            if (file.absolutePath.startsWith(context.filesDir.absolutePath) && file.exists()) {
-                file.delete()
-            }
+        viewModelScope.launch(Dispatchers.IO) { deleteAudioIfUnreferenced(path) }
+    }
+
+    private suspend fun deleteAudioIfUnreferenced(path: String) = withContext(Dispatchers.IO) {
+        if (repository.countByAudioPath(path) > 0) return@withContext
+        val file = File(path).canonicalFile
+        val basePath = context.filesDir.canonicalPath + File.separator
+        if (file.path.startsWith(basePath) && file.isFile) {
+            file.delete()
         }
     }
 
@@ -431,12 +447,10 @@ class NaatViewModel @Inject constructor(
                 createdAt = createdAt
             )
             repository.update(updated)
-            // Delete the replaced/removed audio file (only if app-owned and actually changed)
+            // Imported backups may deduplicate audio across entries. Delete the
+            // replaced payload only after its final database reference is gone.
             if (!previousAudioPath.isNullOrEmpty() && previousAudioPath != finalAudioPath) {
-                val old = File(previousAudioPath)
-                if (old.exists() && old.absolutePath.startsWith(context.filesDir.absolutePath)) {
-                    old.delete()
-                }
+                deleteAudioIfUnreferenced(previousAudioPath)
             }
             if (_selectedNaat.value?.id == id) {
                 _selectedNaat.value = updated // keep an open reader in sync
@@ -458,21 +472,15 @@ class NaatViewModel @Inject constructor(
 
     fun deleteNaat(naat: NaatEntity) {
         viewModelScope.launch {
-            // 1. Delete associated audio file physically if recorded/linked to prevent ghost leakages
-            if (!naat.audioPath.isNullOrEmpty()) {
-                val file = File(naat.audioPath)
-                if (file.exists() && file.absolutePath.startsWith(context.filesDir.absolutePath)) {
-                    val deleted = file.delete()
-                    Log.d("NaatViewModel", "Deleted associated file ${file.name}: $deleted")
-                }
-            }
-            // 2. Delete entry from Database
-            repository.delete(naat)
-            if (_selectedNaat.value?.id == naat.id) {
-                _selectedNaat.value = null
-            }
             if (playbackController.nowPlaying.value?.naatId == naat.id) {
                 playbackController.stop()
+            }
+            repository.delete(naat)
+            // A v2 backup can make several entries share one content-addressed
+            // audio file; keep it until the final reference is deleted.
+            naat.audioPath?.let { deleteAudioIfUnreferenced(it) }
+            if (_selectedNaat.value?.id == naat.id) {
+                _selectedNaat.value = null
             }
         }
     }

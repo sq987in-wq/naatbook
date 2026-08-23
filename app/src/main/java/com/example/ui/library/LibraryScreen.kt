@@ -215,7 +215,7 @@ fun LibraryScreen(
                         modifier = Modifier.testTag("favorites_filter_chip")
                     )
                 }
-                
+
                 // Taxonomy is defined once in NaatCategories: content types only,
                 // never media formats (the old mixed list had an "Audio Only"
                 // folder; audio attachments now live inside any category).
@@ -270,7 +270,7 @@ fun LibraryScreen(
 
                 // Recent entries list representing "Recent Notebooks" in the mockup HTML
                 val recentNaats = allNaatsList.take(3)
-                
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -312,7 +312,7 @@ fun LibraryScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                     }
                 }
-                
+
                 // Content spacing buffer
                 Spacer(modifier = Modifier.height(80.dp))
             }
