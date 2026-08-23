@@ -131,10 +131,11 @@ fun NaatApp(viewModel: NaatViewModel) {
                             GlobalMiniPlayer(
                                 viewModel = viewModel,
                                 onOpen = {
-                                    viewModel.openNowPlayingEntry()
-                                    if (viewModel.selectedNaat.value != null) {
-                                        navController.navigate(NaatRoutes.READER) {
-                                            launchSingleTop = true
+                                    viewModel.openNowPlayingEntry { found ->
+                                        if (found && navController.currentDestination?.route != NaatRoutes.READER) {
+                                            navController.navigate(NaatRoutes.READER) {
+                                                launchSingleTop = true
+                                            }
                                         }
                                     }
                                 }
@@ -323,6 +324,7 @@ private fun openEditor(
 }
 
 private fun closeEditor(viewModel: NaatViewModel, navController: NavHostController) {
+    if (viewModel.isSaving.value) return
     viewModel.setShowAddModal(false)
     navController.popBackStack()
 }

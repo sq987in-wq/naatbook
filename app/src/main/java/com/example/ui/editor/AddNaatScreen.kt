@@ -71,20 +71,27 @@ fun AddNaatModal(
 ) {
     val context = LocalContext.current
 
-    // Edit mode: fields are pre-filled from the entry being edited (null = add new)
-    val editingNaat by viewModel.editingNaat.collectAsState()
-
-    var title by remember { mutableStateOf(editingNaat?.title ?: "") }
-    var poet by remember { mutableStateOf(editingNaat?.poet ?: "") }
-    // Category prefill: normalized defensively so a legacy label (or a blank)
-    // can never end up pre-selected outside the current taxonomy.
-    var selectedCategory by remember {
-        mutableStateOf(
-            editingNaat?.category?.let { NaatCategories.normalize(it) } ?: NaatCategories.DEFAULT
+    // All user-authored values live in SavedStateHandle-backed ViewModel state.
+    val draft by viewModel.editorDraft.collectAsState()
+    val title = draft.title
+    val poet = draft.poet
+    val selectedCategory = draft.category
+    val lyrics = draft.lyrics
+    val existingAudioRemoved = draft.existingAudioRemoved
+    val isEditing = draft.editingId != null
+    val editingNaat = draft.editingId?.let { id ->
+        NaatEntity(
+            id = id,
+            title = draft.title,
+            poet = draft.poet.takeIf { it.isNotBlank() },
+            category = draft.category,
+            lyrics = draft.lyrics.takeIf { it.isNotBlank() },
+            audioType = draft.existingAudioType,
+            audioPath = draft.existingAudioPath,
+            isFavorite = draft.existingFavorite,
+            createdAt = draft.existingCreatedAt
         )
     }
-    var lyrics by remember { mutableStateOf(editingNaat?.lyrics ?: "") }
-    var existingAudioRemoved by remember { mutableStateOf(false) }
 
     var showCategoryDropdown by remember { mutableStateOf(false) }
 
@@ -92,10 +99,11 @@ fun AddNaatModal(
     val activeRecordingFile by viewModel.activeRecordingFile.collectAsState()
     val recordingElapsedMs by viewModel.recordingElapsedMs.collectAsState()
     val recordingAmplitude by viewModel.recordingAmplitude.collectAsState()
+    val isSaving by viewModel.isSaving.collectAsState()
 
-    // Linked local file attachment state
-    var linkedFileUriStr by remember { mutableStateOf<String?>(null) }
-    var linkedFileName by remember { mutableStateOf<String?>(null) }
+    // Copy progress is transient; copied-file ownership is part of the durable draft.
+    val linkedFileUriStr = draft.newAttachmentPath
+    val linkedFileName = draft.newAttachmentName
     var isAttachingFile by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
@@ -110,8 +118,7 @@ fun AddNaatModal(
                     val copiedFile = viewModel.copyLocalFileToAppStorage(uri)
                     isAttachingFile = false
                     if (copiedFile != null) {
-                        linkedFileUriStr = copiedFile.absolutePath
-                        linkedFileName = "Attached file: " + copiedFile.name
+                        viewModel.adoptLinkedFile(copiedFile)
                         Toast.makeText(context, "Audio file attached successfully!", Toast.LENGTH_SHORT).show()
                     } else {
                         Toast.makeText(context, "Failed to copy audio attachment", Toast.LENGTH_SHORT).show()
@@ -145,7 +152,8 @@ fun AddNaatModal(
                     ?.trim()
                     .orEmpty()
                 if (spoken.isNotEmpty()) {
-                    lyrics = if (lyrics.isBlank()) spoken else lyrics.trimEnd() + "\n" + spoken
+                    val updated = if (lyrics.isBlank()) spoken else lyrics.trimEnd() + "\n" + spoken
+                    viewModel.updateDraft { it.copy(lyrics = updated) }
                 }
             }
         }
@@ -166,12 +174,13 @@ fun AddNaatModal(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = if (editingNaat != null) "Edit Notebook Entry" else "Add New Notebook Entry",
+                text = if (isEditing) "Edit Notebook Entry" else "Add New Notebook Entry",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
             IconButton(
                 onClick = onClose,
+                enabled = !isSaving,
                 modifier = Modifier.testTag("close_add_modal")
             ) {
                 Icon(
@@ -187,7 +196,7 @@ fun AddNaatModal(
         // Text Editor Input Fields
         OutlinedTextField(
             value = title,
-            onValueChange = { title = it },
+            onValueChange = { value -> viewModel.updateDraft { it.copy(title = value) } },
             label = { Text("Title (Required)") },
             modifier = Modifier
                 .fillMaxWidth()
@@ -200,7 +209,7 @@ fun AddNaatModal(
 
         OutlinedTextField(
             value = poet,
-            onValueChange = { poet = it },
+            onValueChange = { value -> viewModel.updateDraft { it.copy(poet = value) } },
             label = { Text("Poet Name (Optional)") },
             modifier = Modifier
                 .fillMaxWidth()
@@ -235,7 +244,7 @@ fun AddNaatModal(
                     DropdownMenuItem(
                         text = { Text(cat) },
                         onClick = {
-                            selectedCategory = cat
+                            viewModel.updateDraft { it.copy(category = cat) }
                             showCategoryDropdown = false
                         }
                     )
@@ -247,7 +256,7 @@ fun AddNaatModal(
 
         OutlinedTextField(
             value = lyrics,
-            onValueChange = { lyrics = it },
+            onValueChange = { value -> viewModel.updateDraft { it.copy(lyrics = value) } },
             label = { Text("Lyrics Text Area (Optional)") },
             // Nastaliq the moment the content turns to Urdu/Arabic script
             textStyle = LocalTextStyle.current.copy(
@@ -336,7 +345,7 @@ fun AddNaatModal(
                             }
                             AudioAttachmentPreview(path = attachmentPath, viewModel = viewModel)
                             IconButton(
-                                onClick = { existingAudioRemoved = true },
+                                onClick = { viewModel.updateDraft { it.copy(existingAudioRemoved = true) } },
                                 modifier = Modifier.testTag("remove_current_attachment")
                             ) {
                                 Icon(
@@ -553,8 +562,9 @@ fun AddNaatModal(
                         IconButton(onClick = {
                             // Also delete the copied file from app storage (no orphans)
                             linkedFileUriStr?.let { viewModel.deleteOrphanFile(it) }
-                            linkedFileUriStr = null
-                            linkedFileName = null
+                            viewModel.updateDraft {
+                                it.copy(newAttachmentPath = null, newAttachmentName = null)
+                            }
                         }) {
                             Icon(Icons.Default.Delete, contentDescription = "Remove attached file", tint = HighContrastRed)
                         }
@@ -571,50 +581,10 @@ fun AddNaatModal(
                 if (title.isBlank()) {
                     Toast.makeText(context, "Please enter a valid notebook title", Toast.LENGTH_SHORT).show()
                 } else {
-                    // Resolve audio values: a new take or link wins; otherwise the
-                    // existing attachment is kept (unless explicitly removed).
-                    var audioType = "none"
-                    var audioPath: String? = null
-                    val editing = editingNaat
-
-                    if (activeRecordingFile != null) {
-                        audioType = "recorded"
-                        audioPath = activeRecordingFile?.absolutePath
-                    } else if (linkedFileUriStr != null) {
-                        audioType = "local_file"
-                        audioPath = linkedFileUriStr
-                    } else if (editing != null && !existingAudioRemoved && editing.audioType != "none") {
-                        audioType = editing.audioType
-                        audioPath = editing.audioPath
-                    }
-
-                    if (editing != null) {
-                        viewModel.updateNaat(
-                            id = editing.id,
-                            title = title,
-                            poet = poet,
-                            category = selectedCategory,
-                            lyrics = lyrics,
-                            audioType = audioType,
-                            audioPath = audioPath,
-                            isFavorite = editing.isFavorite,
-                            createdAt = editing.createdAt,
-                            previousAudioPath = editing.audioPath
-                        )
-                        Toast.makeText(context, "Entry Updated!", Toast.LENGTH_SHORT).show()
-                    } else {
-                        viewModel.addNaat(
-                            title = title,
-                            poet = poet,
-                            category = selectedCategory,
-                            lyrics = lyrics,
-                            audioType = audioType,
-                            audioPath = audioPath
-                        )
-                        Toast.makeText(context, "Notebook Entry Saved!", Toast.LENGTH_SHORT).show()
-                    }
+                    viewModel.saveDraft()
                 }
             },
+            enabled = !isSaving && !isAttachingFile,
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary
             ),
@@ -624,11 +594,21 @@ fun AddNaatModal(
                 .testTag("save_notebook_btn"),
             shape = RoundedCornerShape(8.dp)
         ) {
-            Text(
-                text = if (editingNaat != null) "Save Changes" else "Save Entry",
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp
-            )
+            if (isSaving) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Saving…", fontWeight = FontWeight.Bold)
+            } else {
+                Text(
+                    text = if (isEditing) "Save Changes" else "Save Entry",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))

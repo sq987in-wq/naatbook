@@ -15,8 +15,8 @@ abstract class NaatDatabase : RoomDatabase() {
          * v1 -> v2: category/taxonomy restructure. The schema is untouched
          * (category is a plain String column); only the stored values are
          * remapped onto the new taxonomy and the "Audio Only" pseudo-folder
-         * disappears. Registering this Migration explicitly is what prevents
-         * fallbackToDestructiveMigration from wiping user data on upgrade.
+         * disappears. The production builder has no destructive fallback, so
+         * every future schema change must also provide an explicit migration.
          */
         internal val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {

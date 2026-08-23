@@ -110,12 +110,17 @@ class AudioPlayer @Inject constructor(
     }
 
     private fun abandonFocus() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                focusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.abandonAudioFocus(focusChangeListener)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to abandon audio focus", e)
+        } finally {
             focusRequest = null
-        } else {
-            @Suppress("DEPRECATION")
-            audioManager.abandonAudioFocus(focusChangeListener)
         }
     }
 
@@ -162,10 +167,10 @@ class AudioPlayer @Inject constructor(
                         stop()
                     }
                 }
-                setOnCompletionListener {
-                    _isPlaying.value = false
-                    _currentPosition.value = 0
-                    stopProgressTracking()
+                setOnCompletionListener { completed ->
+                    // Completion is terminal: release native resources/focus and clear ownership.
+                    if (generation == playGeneration && mediaPlayer === completed) stop()
+                    else try { completed.release() } catch (_: Exception) {}
                 }
                 setOnErrorListener { _, what, extra ->
                     Log.e(TAG, "MediaPlayer error: what=$what extra=$extra")
@@ -192,6 +197,7 @@ class AudioPlayer @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error pausing", e)
+            stop()
         }
     }
 
@@ -207,6 +213,7 @@ class AudioPlayer @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error resuming", e)
+            stop()
         }
     }
 
@@ -225,26 +232,37 @@ class AudioPlayer @Inject constructor(
 
     fun stop() {
         playGeneration++ // invalidate any pending prepare callback
-        _isPreparing.value = false
         resumeOnFocusGain = false
+        // Detach first. A late async callback can no longer reclaim ownership.
+        val player = mediaPlayer
+        mediaPlayer = null
         try {
-            mediaPlayer?.apply {
-                if (isPlaying) {
-                    stop()
-                }
-                release()
+            if (player != null) {
+                NativeResourceSafety.stopAndRelease(
+                    stop = {
+                        // isPlaying itself can throw for a broken native state.
+                        if (player.isPlaying) player.stop()
+                    },
+                    release = {
+                        try { player.release() } catch (e: Exception) {
+                            Log.e(TAG, "Error releasing player", e)
+                        }
+                    }
+                )
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error in stop", e)
+            Log.e(TAG, "Error stopping player", e)
         } finally {
-            mediaPlayer = null
+            _isPreparing.value = false
             _isPlaying.value = false
             _currentPosition.value = 0
             _duration.value = 0
             _hasActiveSessionFlow.value = false
             stopProgressTracking()
             abandonFocus()
-            onSessionStopped?.invoke()
+            try { onSessionStopped?.invoke() } catch (e: Exception) {
+                Log.e(TAG, "Session-stop callback failed", e)
+            }
         }
     }
 

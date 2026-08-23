@@ -16,6 +16,11 @@ class NaatRepository @Inject constructor(private val naatDao: NaatDao) {
 
     suspend fun update(naat: NaatEntity) = naatDao.updateNaat(naat)
 
+    suspend fun toggleFavorite(id: Int): NaatEntity? {
+        naatDao.toggleFavorite(id)
+        return naatDao.getNaatById(id)
+    }
+
     suspend fun delete(naat: NaatEntity) = naatDao.deleteNaat(naat)
 
     suspend fun deleteById(id: Int) = naatDao.deleteNaatById(id)

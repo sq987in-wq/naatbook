@@ -73,6 +73,7 @@ fun LibraryScreen(
     val filteredNaats by viewModel.filteredNaats.collectAsState()
     val allNaatsList by viewModel.allNaats.collectAsState()
     val favoritesOnly by viewModel.showFavoritesOnly.collectAsState()
+    val isDeleting by viewModel.isDeleting.collectAsState()
 
     // Entry pending deletion - deletions also remove attached audio, so confirm first
     var deleteCandidate by remember { mutableStateOf<NaatEntity?>(null) }
@@ -428,7 +429,7 @@ fun LibraryScreen(
     // Delete confirmation — deletions also remove attached audio files permanently.
     deleteCandidate?.let { candidate ->
         AlertDialog(
-            onDismissRequest = { deleteCandidate = null },
+            onDismissRequest = { if (!isDeleting) deleteCandidate = null },
             title = { Text("Delete this entry?") },
             text = {
                 Text(
@@ -439,16 +440,22 @@ fun LibraryScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.deleteNaat(candidate)
-                        deleteCandidate = null
+                        viewModel.deleteNaat(candidate) { deleteCandidate = null }
                     },
+                    enabled = !isDeleting,
                     modifier = Modifier.testTag("confirm_delete_btn")
                 ) {
-                    Text("Delete", color = HighContrastRed)
+                    if (isDeleting) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Deleting…")
+                    } else {
+                        Text("Delete", color = HighContrastRed)
+                    }
                 }
             },
             dismissButton = {
-                TextButton(onClick = { deleteCandidate = null }) {
+                TextButton(onClick = { deleteCandidate = null }, enabled = !isDeleting) {
                     Text("Cancel")
                 }
             }

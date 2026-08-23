@@ -20,6 +20,10 @@ interface NaatDao {
     @Update
     suspend fun updateNaat(naat: NaatEntity)
 
+    /** Toggles from the value currently stored in Room, never from a stale UI snapshot. */
+    @Query("UPDATE naats SET isFavorite = NOT isFavorite WHERE id = :id")
+    suspend fun toggleFavorite(id: Int): Int
+
     @Delete
     suspend fun deleteNaat(naat: NaatEntity)
 

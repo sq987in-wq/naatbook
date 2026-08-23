@@ -24,7 +24,7 @@ object DatabaseModule {
             "naat_notebook_database"
         )
             .addMigrations(NaatDatabase.MIGRATION_1_2)
-            .fallbackToDestructiveMigration(dropAllTables = true)
+            // Never silently erase a notebook. A missing future migration must fail.
             .build()
 
     @Provides

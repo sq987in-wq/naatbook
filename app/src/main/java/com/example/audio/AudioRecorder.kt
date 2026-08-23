@@ -26,12 +26,15 @@ class AudioRecorder @Inject constructor(
         stop()
         try {
             currentOutputFile = outputFile
-            mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 MediaRecorder(context)
             } else {
                 @Suppress("DEPRECATION")
                 MediaRecorder()
-            }.apply {
+            }
+            // Publish before configuration: prepare/start can throw and catch must release it.
+            mediaRecorder = recorder
+            recorder.apply {
                 setAudioSource(MediaRecorder.AudioSource.MIC)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
@@ -46,12 +49,13 @@ class AudioRecorder @Inject constructor(
             isPaused = false
         } catch (e: Exception) {
             Log.e("AudioRecorder", "Failed to start recording", e)
-            // Never leak the native recorder when start fails
+            // Never leak the native recorder or retain a partial take when startup fails.
             try { mediaRecorder?.release() } catch (_: Exception) {}
             mediaRecorder = null
             currentOutputFile = null
             isRecording = false
             isPaused = false
+            try { outputFile.delete() } catch (_: Exception) {}
         }
     }
 
@@ -80,15 +84,26 @@ class AudioRecorder @Inject constructor(
     }
 
     fun stop() {
+        // Detach first so no callback/query can observe a recorder being torn down.
+        val recorder = mediaRecorder
+        mediaRecorder = null
         try {
-            mediaRecorder?.apply {
-                stop()
-                release()
+            if (recorder != null) {
+                NativeResourceSafety.stopAndRelease(
+                    stop = { recorder.stop() },
+                    release = {
+                        try { recorder.release() } catch (e: Exception) {
+                            Log.e("AudioRecorder", "Error releasing recorder", e)
+                        }
+                    }
+                )
             }
         } catch (e: Exception) {
             Log.e("AudioRecorder", "Error stopping recorder", e)
+            // A failed stop leaves a partial/invalid output that must never be saved.
+            try { currentOutputFile?.delete() } catch (_: Exception) {}
         } finally {
-            mediaRecorder = null
+            currentOutputFile = null
             isRecording = false
             isPaused = false
             startTimestampMs = 0L
