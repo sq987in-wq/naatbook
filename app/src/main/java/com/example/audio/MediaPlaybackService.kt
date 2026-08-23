@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media.session.MediaButtonReceiver
 import com.example.R
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,6 +39,7 @@ import kotlinx.coroutines.launch
  * [start]; mirrors the player's state flows; shuts itself down as soon as
  * the player session is fully stopped/released.
  */
+@AndroidEntryPoint
 class MediaPlaybackService : Service() {
 
     private lateinit var mediaSession: MediaSessionCompat

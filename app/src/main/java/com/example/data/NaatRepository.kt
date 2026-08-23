@@ -1,8 +1,11 @@
 package com.example.data
 
 import kotlinx.coroutines.flow.Flow
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class NaatRepository(private val naatDao: NaatDao) {
+@Singleton
+class NaatRepository @Inject constructor(private val naatDao: NaatDao) {
     val allNaats: Flow<List<NaatEntity>> = naatDao.getAllNaats()
 
     fun getNaatByIdFlow(id: Int): Flow<NaatEntity?> = naatDao.getNaatByIdFlow(id)

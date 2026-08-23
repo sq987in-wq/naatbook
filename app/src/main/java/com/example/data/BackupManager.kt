@@ -3,6 +3,7 @@ package com.example.data
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -12,6 +13,8 @@ import java.io.*
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
+import javax.inject.Inject
+import javax.inject.Singleton
 
 /**
  * Resolves a backup entry to a destination below [baseDir]. Absolute paths,
@@ -30,8 +33,9 @@ internal fun safeBackupDestination(baseDir: File, entryName: String): File? {
     return destination.takeIf { it.canonicalFile.path.startsWith(basePath) }
 }
 
-class BackupManager(
-    private val context: Context,
+@Singleton
+class BackupManager @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val repository: NaatRepository
 ) {
     private companion object {

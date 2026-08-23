@@ -5,9 +5,13 @@ import android.media.MediaRecorder
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
+import dagger.hilt.android.qualifiers.ApplicationContext
+import javax.inject.Inject
 import java.io.File
 
-class AudioRecorder(private val context: Context) {
+class AudioRecorder @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
     private var mediaRecorder: MediaRecorder? = null
     private var currentOutputFile: File? = null
     private var isRecording = false

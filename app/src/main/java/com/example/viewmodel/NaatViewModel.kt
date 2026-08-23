@@ -1,13 +1,14 @@
 package com.example.viewmodel
 
-import android.app.Application
 import android.content.Context
 import android.net.Uri
 import android.util.Log
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.*
 import com.example.data.*
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -17,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import javax.inject.Inject
 
 /** Snapshot of the media-session-owned "now playing" entry, for the global mini-player. */
 data class NowPlaying(
@@ -25,16 +27,15 @@ data class NowPlaying(
     val poet: String?
 )
 
-class NaatViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val context = application.applicationContext
-    private val database = NaatDatabase.getDatabase(context)
-    private val repository = NaatRepository(database.naatDao())
-    private val backupManager = BackupManager(context, repository)
-
-    // Audio players & recorders
-    private val audioRecorder = AudioRecorder(context)
-    val audioPlayer = AudioPlayer(context)
+@HiltViewModel
+class NaatViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val repository: NaatRepository,
+    private val backupManager: BackupManager,
+    private val audioRecorder: AudioRecorder,
+    val audioPlayer: AudioPlayer,
+    private val settingsStore: SettingsStore
+) : ViewModel() {
 
     init {
         // Housekeeping: delete audio files that lost their database entries
@@ -55,8 +56,7 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Preferences & Settings (DataStore-backed; legacy SharedPreferences migrate in once)
-    private val settingsStore = SettingsStore(context)
+    // Preferences & Settings are DataStore-backed; legacy values migrate in once.
 
     // UI Navigation Screen State
     private val _currentTab = MutableStateFlow(0) // 0: Library, 1: Add (via modal), 2: Settings

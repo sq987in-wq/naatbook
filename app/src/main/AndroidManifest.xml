@@ -17,6 +17,7 @@
       in-app, user-controlled ZIP export/import in Settings.
     -->
     <application
+        android:name=".NaatBookApplication"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"

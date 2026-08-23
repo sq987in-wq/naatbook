@@ -8,6 +8,8 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.util.Log
+import dagger.hilt.android.qualifiers.ApplicationContext
+import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -20,7 +22,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
-class AudioPlayer(private val context: Context) {
+class AudioPlayer @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
     private var mediaPlayer: MediaPlayer? = null
 
     init {

@@ -2,6 +2,7 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
+  alias(libs.plugins.hilt.android)
 }
 
 android {
@@ -57,8 +58,13 @@ ksp {
   arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+hilt {
+  enableAggregatingTask = true
+}
+
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
+  implementation(libs.hilt.android)
   implementation(libs.androidx.activity.compose)
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
@@ -92,4 +98,5 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
+  "ksp"(libs.hilt.compiler)
 }
