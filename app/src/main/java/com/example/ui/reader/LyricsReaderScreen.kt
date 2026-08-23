@@ -91,11 +91,18 @@ fun LyricsReaderScreen(
     val defaultFontSize by viewModel.globalFontSize.collectAsState()
     var localFontSize by remember { mutableStateOf(defaultFontSize) }
     
-    // Player controls
-    val audioPlayer = viewModel.audioPlayer
-    val isPlaying by audioPlayer.isPlaying.collectAsState()
-    val currentPos by audioPlayer.currentPosition.collectAsState()
-    val audioDuration by audioPlayer.duration.collectAsState()
+    // Player controls are scoped to this entry; a modal preview or another
+    // entry can never drive this reader's transport UI.
+    val playbackController = viewModel.playbackController
+    val nowPlaying by playbackController.nowPlaying.collectAsState()
+    val hasActiveSession by playbackController.hasActiveSession.collectAsState()
+    val playerIsPlaying by playbackController.isPlaying.collectAsState()
+    val playerPosition by playbackController.currentPosition.collectAsState()
+    val playerDuration by playbackController.duration.collectAsState()
+    val ownsEntry = nowPlaying?.naatId == naat.id && hasActiveSession
+    val isPlaying = ownsEntry && playerIsPlaying
+    val currentPos = if (ownsEntry) playerPosition else 0
+    val audioDuration = if (ownsEntry) playerDuration else 0
 
     // Sync local font size if global changes
     LaunchedEffect(defaultFontSize) {
@@ -223,9 +230,9 @@ fun LyricsReaderScreen(
                         IconButton(
                             onClick = {
                                 if (isPlaying) {
-                                    audioPlayer.pause()
-                                } else if (audioPlayer.hasActiveSession()) {
-                                    audioPlayer.resume()
+                                    playbackController.pause()
+                                } else if (ownsEntry) {
+                                    playbackController.resume()
                                 } else {
                                     viewModel.startEntryPlayback(naat)
                                 }
@@ -243,7 +250,7 @@ fun LyricsReaderScreen(
                         // Progress bar seeking
                         Slider(
                             value = currentPos.toFloat(),
-                            onValueChange = { audioPlayer.seekTo(it.toInt()) },
+                            onValueChange = { playbackController.seekTo(it.toInt()) },
                             valueRange = 0f..(if (audioDuration > 0) audioDuration.toFloat() else 1000f),
                             modifier = Modifier
                                 .weight(1f)

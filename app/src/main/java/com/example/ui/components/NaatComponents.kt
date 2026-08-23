@@ -209,10 +209,10 @@ fun GlobalMiniPlayer(
     viewModel: NaatViewModel,
     onOpen: () -> Unit
 ) {
-    val nowPlaying by viewModel.nowPlaying.collectAsState()
-    val player = viewModel.audioPlayer
-    val hasSession by player.hasActiveSessionFlow.collectAsState()
-    val isPlaying by player.isPlaying.collectAsState()
+    val controller = viewModel.playbackController
+    val nowPlaying by controller.nowPlaying.collectAsState()
+    val hasSession by controller.hasActiveSession.collectAsState()
+    val isPlaying by controller.isPlaying.collectAsState()
 
     val current = nowPlaying
     if (current == null || !hasSession) return
@@ -268,7 +268,7 @@ fun GlobalMiniPlayer(
             }
             Spacer(modifier = Modifier.width(8.dp))
             IconButton(
-                onClick = { player.togglePlayPause() },
+                onClick = { controller.togglePlayPause() },
                 modifier = Modifier
                     .size(40.dp)
                     .testTag("mini_player_play_pause")
@@ -323,22 +323,21 @@ fun AudioAttachmentPreview(
     path: String,
     viewModel: NaatViewModel
 ) {
-    val player = viewModel.audioPlayer
-    val isPlaying by player.isPlaying.collectAsState()
-    val currentPos by player.currentPosition.collectAsState()
-    val duration by player.duration.collectAsState()
-    var started by remember(path) { mutableStateOf(false) }
+    val controller = viewModel.playbackController
+    val activePreviewPath by controller.previewPath.collectAsState()
+    val playerIsPlaying by controller.isPlaying.collectAsState()
+    val currentPos by controller.currentPosition.collectAsState()
+    val duration by controller.duration.collectAsState()
+    val ownsPreview = activePreviewPath == path && controller.ownsPreview(path)
+    val isPlaying = ownsPreview && playerIsPlaying
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(
             onClick = {
                 when {
-                    isPlaying -> player.pause()
-                    started -> player.resume()
-                    else -> {
-                        player.play(path)
-                        started = true
-                    }
+                    isPlaying -> controller.pause()
+                    ownsPreview -> controller.resume()
+                    else -> controller.playPreview(path)
                 }
             },
             modifier = Modifier.testTag("audio_preview_play")
@@ -350,7 +349,11 @@ fun AudioAttachmentPreview(
             )
         }
         Text(
-            text = if (started) "${formatTime(currentPos)} / ${formatTime(duration)}" else "Preview",
+            text = if (ownsPreview) {
+                "${formatTime(currentPos)} / ${formatTime(duration)}"
+            } else {
+                "Preview"
+            },
             style = MaterialTheme.typography.bodySmall,
             color = HighContrastGray
         )

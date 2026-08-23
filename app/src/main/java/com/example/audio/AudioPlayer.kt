@@ -10,6 +10,7 @@ import android.os.Build
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -22,15 +23,15 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 
+@Singleton
 class AudioPlayer @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     private var mediaPlayer: MediaPlayer? = null
 
-    init {
-        // Register for the MediaPlaybackService (lock-screen controls)
-        PlaybackRegistry.attach(this)
-    }
+    /** Notifies the process-scoped controller when the current owner is gone. */
+    internal var onSessionStopped: (() -> Unit)? = null
+
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
@@ -121,12 +122,8 @@ class AudioPlayer @Inject constructor(
     /** True when a media session exists (prepared at least once) and can be resumed. */
     fun hasActiveSession(): Boolean = mediaPlayer != null
 
-    fun play(audioPath: String, title: String? = null, artist: String? = null) {
+    fun play(audioPath: String) {
         stop()
-        // Publish now-playing metadata and raise the MediaSession service so
-        // the lock screen / notification / Bluetooth buttons can control us.
-        PlaybackRegistry.publish(title, artist, audioPath)
-        MediaPlaybackService.start(context)
         val generation = ++playGeneration
         if (!requestFocus()) {
             Log.w(TAG, "Audio focus not granted — playing anyway")
@@ -162,6 +159,7 @@ class AudioPlayer @Inject constructor(
                         startProgressTracking()
                     } catch (e: Exception) {
                         Log.e(TAG, "start() after prepare failed", e)
+                        stop()
                     }
                 }
                 setOnCompletionListener {
@@ -171,17 +169,14 @@ class AudioPlayer @Inject constructor(
                 }
                 setOnErrorListener { _, what, extra ->
                     Log.e(TAG, "MediaPlayer error: what=$what extra=$extra")
-                    _isPreparing.value = false
-                    _isPlaying.value = false
-                    _hasActiveSessionFlow.value = false
-                    stopProgressTracking()
+                    stop()
                     true
                 }
                 prepareAsync() // never block the UI thread
             }
         } catch (e: Exception) {
-            _isPreparing.value = false
             Log.e(TAG, "Error starting playback", e)
+            stop()
         }
     }
 
@@ -249,13 +244,13 @@ class AudioPlayer @Inject constructor(
             _hasActiveSessionFlow.value = false
             stopProgressTracking()
             abandonFocus()
+            onSessionStopped?.invoke()
         }
     }
 
-    /** Full teardown — cancels the coroutine scope. Called from ViewModel.onCleared(). */
+    /** Full process teardown; normal ViewModel destruction must not call this. */
     fun release() {
         stop()
-        PlaybackRegistry.clearPlayer(this)
         playerScope.cancel()
     }
 

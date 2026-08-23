@@ -20,20 +20,13 @@ import java.io.File
 import java.io.FileOutputStream
 import javax.inject.Inject
 
-/** Snapshot of the media-session-owned "now playing" entry, for the global mini-player. */
-data class NowPlaying(
-    val naatId: Int,
-    val title: String,
-    val poet: String?
-)
-
 @HiltViewModel
 class NaatViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: NaatRepository,
     private val backupManager: BackupManager,
     private val audioRecorder: AudioRecorder,
-    val audioPlayer: AudioPlayer,
+    val playbackController: PlaybackController,
     private val settingsStore: SettingsStore
 ) : ViewModel() {
 
@@ -67,11 +60,6 @@ class NaatViewModel @Inject constructor(
 
     private val _selectedNaat = MutableStateFlow<NaatEntity?>(null)
     val selectedNaat: StateFlow<NaatEntity?> = _selectedNaat.asStateFlow()
-
-    // Session ownership: reader listening sessions are owned by the MediaSession
-    // (survive back/minimize/lock). Modal previews are UI-owned (die with the UI).
-    private val _nowPlaying = MutableStateFlow<NowPlaying?>(null)
-    val nowPlaying: StateFlow<NowPlaying?> = _nowPlaying.asStateFlow()
 
     // Filter and Search States
     private val _searchQuery = MutableStateFlow("")
@@ -204,11 +192,8 @@ class NaatViewModel @Inject constructor(
             _recordingState.value = RecordingState.IDLE
             _editingNaat.value = null
             audioRecorder.stop()
-            // Stop an in-modal audio PREVIEW, but never a media-session
-            // listening session that happens to be running under the modal.
-            if (_nowPlaying.value == null) {
-                audioPlayer.stop()
-            }
+            // Stop only the UI-owned preview; service-owned entry playback survives.
+            playbackController.stopPreview()
             stopRecordingMeter()
         }
     }
@@ -219,31 +204,27 @@ class NaatViewModel @Inject constructor(
         // DIFFERENT entry (or deleting it) stops the old audio: anti-bleed rule.
         if (naat != null &&
             naat.id != _selectedNaat.value?.id &&
-            naat.id != _nowPlaying.value?.naatId
+            naat.id != playbackController.nowPlaying.value?.naatId
         ) {
-            audioPlayer.stop()
-            _nowPlaying.value = null
+            playbackController.stop()
         }
         _selectedNaat.value = naat
     }
 
     /** Starts a media-session-owned listening session for an entry (from the reader). */
     fun startEntryPlayback(naat: NaatEntity) {
-        val path = naat.audioPath ?: return
-        _nowPlaying.value = NowPlaying(naatId = naat.id, title = naat.title, poet = naat.poet)
-        audioPlayer.play(path, title = naat.title, artist = naat.poet)
+        playbackController.playEntry(naat)
     }
 
     /** Mini-player tap: jump straight back into the playing entry's reader. */
     fun openNowPlayingEntry() {
-        val current = _nowPlaying.value ?: return
+        val current = playbackController.nowPlaying.value ?: return
         val entry = allNaats.value.firstOrNull { it.id == current.naatId }
         if (entry != null) {
             _selectedNaat.value = entry // direct set: reopening the SAME entry must not stop its audio
         } else {
             // Entry was deleted out from under the session
-            _nowPlaying.value = null
-            audioPlayer.stop()
+            playbackController.stop()
         }
     }
 
@@ -269,7 +250,7 @@ class NaatViewModel @Inject constructor(
         _activeRecordingFile.value?.let { old ->
             if (old.exists()) viewModelScope.launch(Dispatchers.IO) { old.delete() }
         }
-        audioPlayer.stop() // stop any preview before capturing a fresh take
+        playbackController.stop() // prevent playback feedback while capturing a fresh take
         val timestamp = System.currentTimeMillis()
         val file = File(getRecordingsDirectory(), "record_$timestamp.m4a")
         _activeRecordingFile.value = file
@@ -300,7 +281,7 @@ class NaatViewModel @Inject constructor(
     /** Discard the finished take: stop playback, delete the file, reset state. */
     fun discardRecording() {
         audioRecorder.stop()
-        audioPlayer.stop()
+        playbackController.stop()
         _recordingState.value = RecordingState.IDLE
         stopRecordingMeter()
         _activeRecordingFile.value?.let { file ->
@@ -312,8 +293,7 @@ class NaatViewModel @Inject constructor(
     /** Open the add/edit modal pre-filled with an existing entry. */
     fun startEditNaat(naat: NaatEntity) {
         // Editing the entry invalidates its playing session (attachment may change)
-        audioPlayer.stop()
-        _nowPlaying.value = null
+        playbackController.stop()
         _editingNaat.value = naat
         _showAddModal.value = true
     }
@@ -423,7 +403,7 @@ class NaatViewModel @Inject constructor(
         previousAudioPath: String?
     ) {
         audioRecorder.stop()
-        audioPlayer.stop()
+        playbackController.stop()
         _recordingState.value = RecordingState.IDLE
         stopRecordingMeter()
 
@@ -491,9 +471,8 @@ class NaatViewModel @Inject constructor(
             if (_selectedNaat.value?.id == naat.id) {
                 _selectedNaat.value = null
             }
-            if (_nowPlaying.value?.naatId == naat.id) {
-                _nowPlaying.value = null
-                audioPlayer.stop()
+            if (playbackController.nowPlaying.value?.naatId == naat.id) {
+                playbackController.stop()
             }
         }
     }
@@ -544,12 +523,8 @@ class NaatViewModel @Inject constructor(
      * in-progress take so the recording stays complete and previewable on return.
      */
     fun onAppBackgrounded() {
-        // A media-session (reader) listening session MUST survive backgrounding —
-        // the foreground service keeps it alive and controllable from the lock
-        // screen. Only throwaway modal previews (no nowPlaying) are stopped.
-        if (_nowPlaying.value == null) {
-            audioPlayer.stop()
-        }
+        // Entry sessions survive; UI-owned previews do not.
+        playbackController.stopPreview()
         if (_recordingState.value != RecordingState.IDLE) {
             audioRecorder.stop()
             _recordingState.value = RecordingState.IDLE
@@ -559,7 +534,8 @@ class NaatViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        audioPlayer.release() // stops playback AND cancels the player coroutine scope
+        // PlaybackController is process-scoped; ViewModel teardown must not end
+        // a service-owned listening session.
         audioRecorder.stop()
         stopRecordingMeter()
     }
