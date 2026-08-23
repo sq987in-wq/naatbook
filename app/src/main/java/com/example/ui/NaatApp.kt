@@ -186,10 +186,12 @@ fun NaatBottomNavigation(
     currentTab: Int,
     onTabSelected: (Int) -> Unit
 ) {
-    val isDark = isSystemInDarkTheme() || !MaterialTheme.colorScheme.background.equals(Color.White)
+    // Child composables must NEVER re-read the system dark flag: the app's
+    // explicit White/Black/System mode is already resolved into the colorScheme.
+    // Trusting the scheme keeps every component consistent with the chosen mode.
     val bg = MaterialTheme.colorScheme.background
     val textAndIconsColor = MaterialTheme.colorScheme.onBackground
-    val borderCol = if (isDark) Color(0xFF1F1F1F) else Color(0xFFE5E5E5)
+    val borderCol = MaterialTheme.colorScheme.outline
 
     Column(
         modifier = Modifier
@@ -351,9 +353,8 @@ fun LibraryScreen(viewModel: NaatViewModel) {
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        val isDark = isSystemInDarkTheme() || !MaterialTheme.colorScheme.background.equals(Color.White)
-        val searchBg = if (isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F2)
-        val searchBorder = if (isDark) Color(0xFF333333) else Color(0xFFE5E5E5)
+        val searchBg = MaterialTheme.colorScheme.surfaceVariant
+        val searchBorder = MaterialTheme.colorScheme.outline
 
         // Core Top Search Bar
         Row(
@@ -722,10 +723,10 @@ fun FolderSleekCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isDark = isSystemInDarkTheme() || !MaterialTheme.colorScheme.background.equals(Color.White)
-    val cardBg = if (isDark) Color(0xFF121212) else Color(0xFFF8F8F8)
-    val cardBorder = if (isDark) Color(0xFF1F1F1F) else Color(0xFFE5E5E5)
-    val iconBg = if (isDark) Color(0xFF1A1A1A) else Color(0xFFEEEEEE)
+    val cardBg = MaterialTheme.colorScheme.surfaceVariant
+    val cardBorder = MaterialTheme.colorScheme.outline
+    // Icon chips use the inverse surface so the glyph wells read against the card
+    val iconBg = MaterialTheme.colorScheme.background
 
     Card(
         modifier = modifier
@@ -791,9 +792,8 @@ fun NaatRowItem(
     onFavoriteClick: () -> Unit,
     onEditClick: () -> Unit
 ) {
-    val isDark = isSystemInDarkTheme() || !MaterialTheme.colorScheme.background.equals(Color.White)
-    val cardBg = if (isDark) Color(0xFF121212) else Color(0xFFF8F8F8)
-    val cardBorder = if (isDark) Color(0xFF1F1F1F) else Color(0xFFE5E5E5)
+    val cardBg = MaterialTheme.colorScheme.surfaceVariant
+    val cardBorder = MaterialTheme.colorScheme.outline
 
     Card(
         modifier = Modifier
@@ -1459,7 +1459,7 @@ fun SettingsScreen(viewModel: NaatViewModel) {
 
         // 1. Theme Configuration
         Text(
-            text = "Strict Theme Engine",
+            text = "App Theme",
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.titleMedium
         )
@@ -1476,7 +1476,7 @@ fun SettingsScreen(viewModel: NaatViewModel) {
                 listOf(
                     "system" to "Match System Settings",
                     "white" to "Total White Mode",
-                    "black" to "Total Black Mode (OLED Friendly)"
+                    "black" to "Total Black Mode"
                 ).forEach { (mode, title) ->
                     Row(
                         modifier = Modifier
