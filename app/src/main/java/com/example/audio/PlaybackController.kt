@@ -9,87 +9,80 @@ import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** Snapshot of the media-session-owned entry shown by the global mini-player. */
+/** Snapshot of the Media3 session-owned entry shown by the global mini-player. */
 data class NowPlaying(
     val naatId: Int,
     val title: String,
     val poet: String?
 )
 
-/**
- * Process-wide owner of every playback session.
- *
- * Entry playback is service-owned and carries [nowPlaying] metadata, so it can
- * survive reader/activity teardown. Editor previews are UI-owned and carry a
- * [previewPath], so backgrounding or closing the editor can stop only the
- * preview without accidentally killing an entry session.
- *
- * This intentionally formalizes the existing platform MediaPlayer model.
- * Migration to Media3 remains deferred to a separate change.
- */
+/** Process-wide ownership boundary around the shared Media3 player. */
 @Singleton
 class PlaybackController @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val audioPlayer: AudioPlayer
+    private val engine: Media3PlaybackEngine
 ) {
     private val _nowPlaying = MutableStateFlow<NowPlaying?>(null)
     val nowPlaying: StateFlow<NowPlaying?> = _nowPlaying.asStateFlow()
-
     private val _previewPath = MutableStateFlow<String?>(null)
     val previewPath: StateFlow<String?> = _previewPath.asStateFlow()
 
-    val isPlaying = audioPlayer.isPlaying
-    val currentPosition = audioPlayer.currentPosition
-    val duration = audioPlayer.duration
-    val isPreparing = audioPlayer.isPreparing
-    val hasActiveSession = audioPlayer.hasActiveSessionFlow
+    val isPlaying = engine.isPlaying
+    val currentPosition = engine.currentPosition
+    val duration = engine.duration
+    val isPreparing = engine.isPreparing
+    val hasActiveSession = engine.hasActiveSession
 
     init {
-        audioPlayer.onSessionStopped = {
+        engine.onSessionStopped = {
+            val wasEntrySession = _nowPlaying.value != null
             _nowPlaying.value = null
             _previewPath.value = null
+            if (wasEntrySession) MediaPlaybackService.stop(context)
         }
     }
 
     fun playEntry(naat: NaatEntity) {
         val path = naat.audioPath ?: return
-        // AudioPlayer.play() stops and clears the previous owner first.
-        audioPlayer.play(path)
-        if (!audioPlayer.hasActiveSession()) return
+        engine.play(
+            audioPath = path,
+            mediaId = "naat:${naat.id}",
+            title = naat.title,
+            artist = naat.poet
+        )
+        if (!engine.hasActiveSession()) return
         _previewPath.value = null
         _nowPlaying.value = NowPlaying(naat.id, naat.title, naat.poet)
         MediaPlaybackService.start(context)
     }
 
     fun playPreview(path: String) {
-        // Previews never raise the foreground media service.
-        audioPlayer.play(path)
-        if (!audioPlayer.hasActiveSession()) return
+        engine.play(
+            audioPath = path,
+            mediaId = "preview:${path.hashCode()}",
+            title = "Audio preview",
+            artist = null
+        )
+        if (!engine.hasActiveSession()) return
         _nowPlaying.value = null
         _previewPath.value = path
     }
 
     fun ownsEntry(naatId: Int): Boolean =
-        _nowPlaying.value?.naatId == naatId && audioPlayer.hasActiveSession()
+        _nowPlaying.value?.naatId == naatId && engine.hasActiveSession()
 
     fun ownsPreview(path: String): Boolean =
-        _previewPath.value == path && audioPlayer.hasActiveSession()
+        _previewPath.value == path && engine.hasActiveSession()
 
-    fun hasActiveSession(): Boolean = audioPlayer.hasActiveSession()
+    fun hasActiveSession(): Boolean = engine.hasActiveSession()
+    fun pause() = engine.pause()
+    fun resume() = engine.resume()
+    fun togglePlayPause() = engine.togglePlayPause()
+    fun seekTo(positionMs: Int) = engine.seekTo(positionMs)
+    fun stop() = engine.stop()
 
-    fun pause() = audioPlayer.pause()
-
-    fun resume() = audioPlayer.resume()
-
-    fun togglePlayPause() = audioPlayer.togglePlayPause()
-
-    fun seekTo(positionMs: Int) = audioPlayer.seekTo(positionMs)
-
-    /** Stops whichever owner currently holds the shared player. */
-    fun stop() = audioPlayer.stop()
-
-    /** Stops a modal preview without touching service-owned entry playback. */
+    /** Closing/backgrounding the editor cannot stop a service-owned entry. */
     fun stopPreview() {
-        if (_previewPath.value != null) audioPlayer.stop()
+        if (_previewPath.value != null) engine.stop()
     }
 }
