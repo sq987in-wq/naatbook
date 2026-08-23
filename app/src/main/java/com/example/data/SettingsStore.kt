@@ -7,10 +7,13 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import java.io.IOException
+import javax.inject.Inject
+import javax.inject.Singleton
 
 /**
  * App settings backed by Preferences DataStore.
@@ -31,7 +34,10 @@ private val Context.settingsDataStore by preferencesDataStore(
     }
 )
 
-class SettingsStore(private val context: Context) {
+@Singleton
+class SettingsStore @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
 
     val themeMode: Flow<String> = context.settingsDataStore.data
         .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }

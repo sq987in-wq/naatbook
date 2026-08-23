@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat
 import androidx.media.app.NotificationCompat.MediaStyle
 import androidx.media.session.MediaButtonReceiver
 import com.example.R
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,9 +28,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 /**
- * Foreground service exposing the active [AudioPlayer] through a
+ * Foreground service exposing the active [PlaybackController] through a
  * MediaSessionCompat + media-style notification. This is what powers
  * lock-screen playback controls (play/pause/stop/seek), headset and
  * Bluetooth media buttons, and the system media output switcher.
@@ -38,7 +40,10 @@ import kotlinx.coroutines.launch
  * [start]; mirrors the player's state flows; shuts itself down as soon as
  * the player session is fully stopped/released.
  */
+@AndroidEntryPoint
 class MediaPlaybackService : Service() {
+
+    @Inject lateinit var playbackController: PlaybackController
 
     private lateinit var mediaSession: MediaSessionCompat
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -54,19 +59,19 @@ class MediaPlaybackService : Service() {
 
     private val sessionCallback = object : MediaSessionCompat.Callback() {
         override fun onPlay() {
-            PlaybackRegistry.player?.let { if (it.hasActiveSession()) it.resume() }
+            if (playbackController.hasActiveSession()) playbackController.resume()
         }
 
         override fun onPause() {
-            PlaybackRegistry.player?.pause()
+            playbackController.pause()
         }
 
         override fun onSeekTo(pos: Long) {
-            PlaybackRegistry.player?.seekTo(pos.toInt())
+            playbackController.seekTo(pos.toInt())
         }
 
         override fun onStop() {
-            PlaybackRegistry.player?.stop()
+            playbackController.stop()
             shutdown()
         }
     }
@@ -91,37 +96,41 @@ class MediaPlaybackService : Service() {
         if (intent != null) {
             MediaButtonReceiver.handleIntent(mediaSession, intent)
         }
-        val player = PlaybackRegistry.player
-        if (player == null) {
-            // Process resurrected without a live player — nothing to control.
+        if (!playbackController.hasActiveSession() || playbackController.nowPlaying.value == null) {
+            // Process resurrected without a live entry session — nothing to control.
             shutdown()
         } else {
-            setForegroundNotification(player.isPlaying.value)
+            setForegroundNotification(playbackController.isPlaying.value)
             lastMetadataDuration = -1
-            pushMetadata(player.duration.value)
-            startSync(player)
+            pushMetadata(playbackController.duration.value)
+            startSync()
         }
         return START_STICKY
     }
 
     /** Mirrors player state flows into the MediaSession + notification. */
-    private fun startSync(player: AudioPlayer) {
+    private fun startSync() {
         if (syncJob != null) return
         syncJob = serviceScope.launch {
             combine(
-                player.isPlaying,
-                player.currentPosition,
-                player.duration
-            ) { playing, pos, dur -> Triple(playing, pos, dur) }
-                .collect { (playing, positionMs, durationMs) ->
-                    pushPlaybackState(playing, positionMs)
-                    pushMetadata(durationMs)
-                    maybeUpdateNotification(playing)
-                    if (!playing && !player.hasActiveSession()) {
-                        // Player fully stopped/released — retire the service.
-                        shutdown()
-                    }
+                playbackController.isPlaying,
+                playbackController.currentPosition,
+                playbackController.duration,
+                playbackController.hasActiveSession
+            ) { playing, pos, dur, hasSession ->
+                PlaybackSnapshot(playing, pos, dur, hasSession)
+            }.collect { snapshot ->
+                pushPlaybackState(snapshot.isPlaying, snapshot.positionMs)
+                pushMetadata(snapshot.durationMs)
+                maybeUpdateNotification(snapshot.isPlaying)
+                if (
+                    (!snapshot.hasSession && !playbackController.hasActiveSession()) ||
+                    playbackController.nowPlaying.value == null
+                ) {
+                    // Player fully stopped or switched to a UI-owned preview.
+                    shutdown()
                 }
+            }
         }
     }
 
@@ -132,7 +141,7 @@ class MediaPlaybackService : Service() {
         lastPushedPlaying = playing
         lastPushedPositionSec = positionSec
 
-        val hasSession = PlaybackRegistry.player?.hasActiveSession() == true
+        val hasSession = playbackController.hasActiveSession()
         val state = when {
             playing -> PlaybackStateCompat.STATE_PLAYING
             hasSession -> PlaybackStateCompat.STATE_PAUSED
@@ -159,9 +168,9 @@ class MediaPlaybackService : Service() {
             MediaMetadataCompat.Builder()
                 .putString(
                     MediaMetadataCompat.METADATA_KEY_TITLE,
-                    PlaybackRegistry.currentTitle ?: getString(R.string.app_name)
+                    playbackController.nowPlaying.value?.title ?: getString(R.string.app_name)
                 )
-                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, PlaybackRegistry.currentArtist)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, playbackController.nowPlaying.value?.poet)
                 .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs.toLong())
                 .build()
         )
@@ -213,8 +222,8 @@ class MediaPlaybackService : Service() {
         ).build()
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_naatbook)
-            .setContentTitle(PlaybackRegistry.currentTitle ?: getString(R.string.app_name))
-            .setContentText(PlaybackRegistry.currentArtist)
+            .setContentTitle(playbackController.nowPlaying.value?.title ?: getString(R.string.app_name))
+            .setContentText(playbackController.nowPlaying.value?.poet)
             .setContentIntent(launchIntent())
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC) // fully visible on the lock screen
             .setOnlyAlertOnce(true)
@@ -260,7 +269,7 @@ class MediaPlaybackService : Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         // App swiped away from recents — retire playback alongside the task
-        PlaybackRegistry.player?.stop()
+        playbackController.stop()
         shutdown()
         super.onTaskRemoved(rootIntent)
     }
@@ -277,6 +286,13 @@ class MediaPlaybackService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private data class PlaybackSnapshot(
+        val isPlaying: Boolean,
+        val positionMs: Int,
+        val durationMs: Int,
+        val hasSession: Boolean
+    )
 
     companion object {
         private const val TAG = "NaatPlayback"

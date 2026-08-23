@@ -1,13 +1,14 @@
 package com.example.viewmodel
 
-import android.app.Application
 import android.content.Context
 import android.net.Uri
 import android.util.Log
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.*
 import com.example.data.*
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -17,24 +18,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import javax.inject.Inject
 
-/** Snapshot of the media-session-owned "now playing" entry, for the global mini-player. */
-data class NowPlaying(
-    val naatId: Int,
-    val title: String,
-    val poet: String?
-)
-
-class NaatViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val context = application.applicationContext
-    private val database = NaatDatabase.getDatabase(context)
-    private val repository = NaatRepository(database.naatDao())
-    private val backupManager = BackupManager(context, repository)
-
-    // Audio players & recorders
-    private val audioRecorder = AudioRecorder(context)
-    val audioPlayer = AudioPlayer(context)
+@HiltViewModel
+class NaatViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val repository: NaatRepository,
+    private val backupManager: BackupManager,
+    private val audioRecorder: AudioRecorder,
+    val playbackController: PlaybackController,
+    private val settingsStore: SettingsStore
+) : ViewModel() {
 
     init {
         // Housekeeping: delete audio files that lost their database entries
@@ -42,7 +36,11 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val referenced = repository.allNaats.first().mapNotNull { it.audioPath }.toSet()
-                listOf(getRecordingsDirectory(), getLinkedDirectory()).forEach { dir ->
+                listOf(
+                    getRecordingsDirectory(),
+                    getLinkedDirectory(),
+                    getImportedAudioDirectory()
+                ).forEach { dir ->
                     dir.listFiles()?.forEach { file ->
                         if (file.isFile && file.absolutePath !in referenced && file.delete()) {
                             Log.d("NaatViewModel", "Cleaned orphaned audio file: ${file.name}")
@@ -55,8 +53,7 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Preferences & Settings (DataStore-backed; legacy SharedPreferences migrate in once)
-    private val settingsStore = SettingsStore(context)
+    // Preferences & Settings are DataStore-backed; legacy values migrate in once.
 
     // UI Navigation Screen State
     private val _currentTab = MutableStateFlow(0) // 0: Library, 1: Add (via modal), 2: Settings
@@ -67,11 +64,6 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _selectedNaat = MutableStateFlow<NaatEntity?>(null)
     val selectedNaat: StateFlow<NaatEntity?> = _selectedNaat.asStateFlow()
-
-    // Session ownership: reader listening sessions are owned by the MediaSession
-    // (survive back/minimize/lock). Modal previews are UI-owned (die with the UI).
-    private val _nowPlaying = MutableStateFlow<NowPlaying?>(null)
-    val nowPlaying: StateFlow<NowPlaying?> = _nowPlaying.asStateFlow()
 
     // Filter and Search States
     private val _searchQuery = MutableStateFlow("")
@@ -204,11 +196,8 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
             _recordingState.value = RecordingState.IDLE
             _editingNaat.value = null
             audioRecorder.stop()
-            // Stop an in-modal audio PREVIEW, but never a media-session
-            // listening session that happens to be running under the modal.
-            if (_nowPlaying.value == null) {
-                audioPlayer.stop()
-            }
+            // Stop only the UI-owned preview; service-owned entry playback survives.
+            playbackController.stopPreview()
             stopRecordingMeter()
         }
     }
@@ -219,31 +208,27 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         // DIFFERENT entry (or deleting it) stops the old audio: anti-bleed rule.
         if (naat != null &&
             naat.id != _selectedNaat.value?.id &&
-            naat.id != _nowPlaying.value?.naatId
+            naat.id != playbackController.nowPlaying.value?.naatId
         ) {
-            audioPlayer.stop()
-            _nowPlaying.value = null
+            playbackController.stop()
         }
         _selectedNaat.value = naat
     }
 
     /** Starts a media-session-owned listening session for an entry (from the reader). */
     fun startEntryPlayback(naat: NaatEntity) {
-        val path = naat.audioPath ?: return
-        _nowPlaying.value = NowPlaying(naatId = naat.id, title = naat.title, poet = naat.poet)
-        audioPlayer.play(path, title = naat.title, artist = naat.poet)
+        playbackController.playEntry(naat)
     }
 
     /** Mini-player tap: jump straight back into the playing entry's reader. */
     fun openNowPlayingEntry() {
-        val current = _nowPlaying.value ?: return
+        val current = playbackController.nowPlaying.value ?: return
         val entry = allNaats.value.firstOrNull { it.id == current.naatId }
         if (entry != null) {
             _selectedNaat.value = entry // direct set: reopening the SAME entry must not stop its audio
         } else {
             // Entry was deleted out from under the session
-            _nowPlaying.value = null
-            audioPlayer.stop()
+            playbackController.stop()
         }
     }
 
@@ -269,7 +254,7 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         _activeRecordingFile.value?.let { old ->
             if (old.exists()) viewModelScope.launch(Dispatchers.IO) { old.delete() }
         }
-        audioPlayer.stop() // stop any preview before capturing a fresh take
+        playbackController.stop() // prevent playback feedback while capturing a fresh take
         val timestamp = System.currentTimeMillis()
         val file = File(getRecordingsDirectory(), "record_$timestamp.m4a")
         _activeRecordingFile.value = file
@@ -300,7 +285,7 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
     /** Discard the finished take: stop playback, delete the file, reset state. */
     fun discardRecording() {
         audioRecorder.stop()
-        audioPlayer.stop()
+        playbackController.stop()
         _recordingState.value = RecordingState.IDLE
         stopRecordingMeter()
         _activeRecordingFile.value?.let { file ->
@@ -312,8 +297,7 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
     /** Open the add/edit modal pre-filled with an existing entry. */
     fun startEditNaat(naat: NaatEntity) {
         // Editing the entry invalidates its playing session (attachment may change)
-        audioPlayer.stop()
-        _nowPlaying.value = null
+        playbackController.stop()
         _editingNaat.value = naat
         _showAddModal.value = true
     }
@@ -321,6 +305,14 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
     // --- Local Device File Attachment ---
     private fun getLinkedDirectory(): File {
         val dir = File(context.filesDir, "linked")
+        if (!dir.exists()) {
+            dir.mkdirs()
+        }
+        return dir
+    }
+
+    private fun getImportedAudioDirectory(): File {
+        val dir = File(context.filesDir, "audio")
         if (!dir.exists()) {
             dir.mkdirs()
         }
@@ -351,13 +343,17 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Deletes a file inside the app's private storage (e.g. a removed attachment). */
+    /** Deletes an app-owned file only when no database entry still references it. */
     fun deleteOrphanFile(path: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val file = File(path)
-            if (file.absolutePath.startsWith(context.filesDir.absolutePath) && file.exists()) {
-                file.delete()
-            }
+        viewModelScope.launch(Dispatchers.IO) { deleteAudioIfUnreferenced(path) }
+    }
+
+    private suspend fun deleteAudioIfUnreferenced(path: String) = withContext(Dispatchers.IO) {
+        if (repository.countByAudioPath(path) > 0) return@withContext
+        val file = File(path).canonicalFile
+        val basePath = context.filesDir.canonicalPath + File.separator
+        if (file.path.startsWith(basePath) && file.isFile) {
+            file.delete()
         }
     }
 
@@ -423,7 +419,7 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         previousAudioPath: String?
     ) {
         audioRecorder.stop()
-        audioPlayer.stop()
+        playbackController.stop()
         _recordingState.value = RecordingState.IDLE
         stopRecordingMeter()
 
@@ -451,12 +447,10 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
                 createdAt = createdAt
             )
             repository.update(updated)
-            // Delete the replaced/removed audio file (only if app-owned and actually changed)
+            // Imported backups may deduplicate audio across entries. Delete the
+            // replaced payload only after its final database reference is gone.
             if (!previousAudioPath.isNullOrEmpty() && previousAudioPath != finalAudioPath) {
-                val old = File(previousAudioPath)
-                if (old.exists() && old.absolutePath.startsWith(context.filesDir.absolutePath)) {
-                    old.delete()
-                }
+                deleteAudioIfUnreferenced(previousAudioPath)
             }
             if (_selectedNaat.value?.id == id) {
                 _selectedNaat.value = updated // keep an open reader in sync
@@ -478,22 +472,15 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteNaat(naat: NaatEntity) {
         viewModelScope.launch {
-            // 1. Delete associated audio file physically if recorded/linked to prevent ghost leakages
-            if (!naat.audioPath.isNullOrEmpty()) {
-                val file = File(naat.audioPath)
-                if (file.exists() && file.absolutePath.startsWith(context.filesDir.absolutePath)) {
-                    val deleted = file.delete()
-                    Log.d("NaatViewModel", "Deleted associated file ${file.name}: $deleted")
-                }
+            if (playbackController.nowPlaying.value?.naatId == naat.id) {
+                playbackController.stop()
             }
-            // 2. Delete entry from Database
             repository.delete(naat)
+            // A v2 backup can make several entries share one content-addressed
+            // audio file; keep it until the final reference is deleted.
+            naat.audioPath?.let { deleteAudioIfUnreferenced(it) }
             if (_selectedNaat.value?.id == naat.id) {
                 _selectedNaat.value = null
-            }
-            if (_nowPlaying.value?.naatId == naat.id) {
-                _nowPlaying.value = null
-                audioPlayer.stop()
             }
         }
     }
@@ -544,12 +531,8 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
      * in-progress take so the recording stays complete and previewable on return.
      */
     fun onAppBackgrounded() {
-        // A media-session (reader) listening session MUST survive backgrounding —
-        // the foreground service keeps it alive and controllable from the lock
-        // screen. Only throwaway modal previews (no nowPlaying) are stopped.
-        if (_nowPlaying.value == null) {
-            audioPlayer.stop()
-        }
+        // Entry sessions survive; UI-owned previews do not.
+        playbackController.stopPreview()
         if (_recordingState.value != RecordingState.IDLE) {
             audioRecorder.stop()
             _recordingState.value = RecordingState.IDLE
@@ -559,7 +542,8 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
-        audioPlayer.release() // stops playback AND cancels the player coroutine scope
+        // PlaybackController is process-scoped; ViewModel teardown must not end
+        // a service-owned listening session.
         audioRecorder.stop()
         stopRecordingMeter()
     }

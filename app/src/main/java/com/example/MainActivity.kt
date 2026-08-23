@@ -4,22 +4,22 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.lifecycle.ViewModelProvider
 import com.example.ui.NaatApp
 import com.example.viewmodel.NaatViewModel
+import dagger.hilt.android.AndroidEntryPoint
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
-  private lateinit var viewModel: NaatViewModel
+  private val viewModel: NaatViewModel by viewModels()
 
   override fun onCreate(savedInstanceState: Bundle?) {
     // Handle the branded splash screen transition (must be called before super.onCreate).
     installSplashScreen()
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
-
-    viewModel = ViewModelProvider(this)[NaatViewModel::class.java]
 
     setContent {
       NaatApp(viewModel = viewModel)
