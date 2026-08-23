@@ -14,6 +14,8 @@ class NaatRepository @Inject constructor(private val naatDao: NaatDao) {
 
     suspend fun insert(naat: NaatEntity): Long = naatDao.insertNaat(naat)
 
+    suspend fun insertAll(naats: List<NaatEntity>): List<Long> = naatDao.insertNaats(naats)
+
     suspend fun update(naat: NaatEntity) = naatDao.updateNaat(naat)
 
     suspend fun toggleFavorite(id: Int): NaatEntity? {

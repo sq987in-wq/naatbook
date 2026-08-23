@@ -17,6 +17,10 @@ interface NaatDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertNaat(naat: NaatEntity): Long
 
+    /** One generated Room transaction: either the complete restore is inserted or none is. */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertNaats(naats: List<NaatEntity>): List<Long>
+
     @Update
     suspend fun updateNaat(naat: NaatEntity)
 
