@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.speech.RecognizerIntent
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -32,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
@@ -303,6 +305,7 @@ fun LibraryScreen(viewModel: NaatViewModel) {
     val selectedFolder by viewModel.selectedFolder.collectAsState()
     val filteredNaats by viewModel.filteredNaats.collectAsState()
     val allNaatsList by viewModel.allNaats.collectAsState()
+    val favoritesOnly by viewModel.showFavoritesOnly.collectAsState()
 
     // Entry pending deletion - deletions also remove attached audio, so confirm first
     var deleteCandidate by remember { mutableStateOf<NaatEntity?>(null) }
@@ -410,21 +413,35 @@ fun LibraryScreen(viewModel: NaatViewModel) {
         Spacer(modifier = Modifier.height(16.dp))
 
         if (selectedFolder == null) {
-            if (searchQuery.isBlank()) {
+            if (searchQuery.isBlank() && !favoritesOnly) {
             // Main Folder System Grid View with Recent entries
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
             ) {
-                Text(
-                    text = "LIBRARY FOLDERS",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = HighContrastGray,
-                    letterSpacing = 1.5.sp,
-                    modifier = Modifier.padding(bottom = 12.dp, start = 4.dp)
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp, start = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "LIBRARY FOLDERS",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = HighContrastGray,
+                        letterSpacing = 1.5.sp
+                    )
+                    // Quick filter: show only starred/favorite entries (across all folders)
+                    FilterChip(
+                        selected = favoritesOnly,
+                        onClick = { viewModel.toggleFavoritesOnly() },
+                        label = { Text("♥ Favorites", fontSize = 11.sp) },
+                        modifier = Modifier.testTag("favorites_filter_chip")
+                    )
+                }
                 
                 val foldersList = listOf(
                     "Hamd-o-Naat" to Icons.Default.AutoStories,
@@ -522,7 +539,8 @@ fun LibraryScreen(viewModel: NaatViewModel) {
                             naat = naat,
                             onItemClick = { viewModel.selectNaat(naat) },
                             onDeleteClick = { deleteCandidate = naat },
-                            onFavoriteClick = { viewModel.toggleFavorite(naat) }
+                            onFavoriteClick = { viewModel.toggleFavorite(naat) },
+                            onEditClick = { viewModel.startEditNaat(naat) }
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                     }
@@ -532,9 +550,13 @@ fun LibraryScreen(viewModel: NaatViewModel) {
                 Spacer(modifier = Modifier.height(80.dp))
             }
             } else {
-                // Global search results across every folder
+                // Results list: global search across folders, and/or the favorites filter
                 Text(
-                    text = "RESULTS FOR \"${searchQuery.trim().uppercase()}\"",
+                    text = when {
+                        favoritesOnly && searchQuery.isNotBlank() -> "FAVORITES · \"${searchQuery.trim().uppercase()}\""
+                        favoritesOnly -> "FAVORITES"
+                        else -> "RESULTS FOR \"${searchQuery.trim().uppercase()}\""
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = HighContrastGray,
@@ -549,7 +571,11 @@ fun LibraryScreen(viewModel: NaatViewModel) {
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "No matches found.\nTry a different title, poet, or lyric phrase.",
+                            text = if (favoritesOnly && searchQuery.isBlank()) {
+                                "No favorites yet.\nTap the ♥ on any entry to star it."
+                            } else {
+                                "No matches found.\nTry a different title, poet, or lyric phrase."
+                            },
                             textAlign = TextAlign.Center,
                             style = MaterialTheme.typography.bodyMedium,
                             color = HighContrastGray
@@ -561,12 +587,13 @@ fun LibraryScreen(viewModel: NaatViewModel) {
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(filteredNaats) { naat ->
-                            NaatRowItem(
-                                naat = naat,
-                                onItemClick = { viewModel.selectNaat(naat) },
-                                onDeleteClick = { deleteCandidate = naat },
-                                onFavoriteClick = { viewModel.toggleFavorite(naat) }
-                            )
+                        NaatRowItem(
+                            naat = naat,
+                            onItemClick = { viewModel.selectNaat(naat) },
+                            onDeleteClick = { deleteCandidate = naat },
+                            onFavoriteClick = { viewModel.toggleFavorite(naat) },
+                            onEditClick = { viewModel.startEditNaat(naat) }
+                        )
                         }
                     }
                 }
@@ -622,7 +649,8 @@ fun LibraryScreen(viewModel: NaatViewModel) {
                             naat = naat,
                             onItemClick = { viewModel.selectNaat(naat) },
                             onDeleteClick = { deleteCandidate = naat },
-                            onFavoriteClick = { viewModel.toggleFavorite(naat) }
+                            onFavoriteClick = { viewModel.toggleFavorite(naat) },
+                            onEditClick = { viewModel.startEditNaat(naat) }
                         )
                     }
                 }
@@ -736,7 +764,8 @@ fun NaatRowItem(
     naat: NaatEntity,
     onItemClick: () -> Unit,
     onDeleteClick: () -> Unit,
-    onFavoriteClick: () -> Unit
+    onFavoriteClick: () -> Unit,
+    onEditClick: () -> Unit
 ) {
     val isDark = isSystemInDarkTheme() || !MaterialTheme.colorScheme.background.equals(Color.White)
     val cardBg = if (isDark) Color(0xFF121212) else Color(0xFFF8F8F8)
@@ -802,6 +831,16 @@ fun NaatRowItem(
                     )
                 }
 
+                // Edit entry
+                IconButton(onClick = onEditClick, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit entry",
+                        tint = HighContrastGray,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
                 // Favorite Quick Heart Tag
                 IconButton(onClick = onFavoriteClick, modifier = Modifier.size(40.dp)) {
                     Icon(
@@ -835,15 +874,21 @@ fun AddNaatModal(
 ) {
     val context = LocalContext.current
     
-    var title by remember { mutableStateOf("") }
-    var poet by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf("Hamd-o-Naat") }
-    var lyrics by remember { mutableStateOf("") }
-    
+    // Edit mode: fields are pre-filled from the entry being edited (null = add new)
+    val editingNaat by viewModel.editingNaat.collectAsState()
+
+    var title by remember { mutableStateOf(editingNaat?.title ?: "") }
+    var poet by remember { mutableStateOf(editingNaat?.poet ?: "") }
+    var selectedCategory by remember { mutableStateOf(editingNaat?.category ?: "Hamd-o-Naat") }
+    var lyrics by remember { mutableStateOf(editingNaat?.lyrics ?: "") }
+    var existingAudioRemoved by remember { mutableStateOf(false) }
+
     var showCategoryDropdown by remember { mutableStateOf(false) }
     
     val recordingState by viewModel.recordingState.collectAsState()
     val activeRecordingFile by viewModel.activeRecordingFile.collectAsState()
+    val recordingElapsedMs by viewModel.recordingElapsedMs.collectAsState()
+    val recordingAmplitude by viewModel.recordingAmplitude.collectAsState()
     
     // Linked local file attachment state
     var linkedFileUriStr by remember { mutableStateOf<String?>(null) }
@@ -900,7 +945,7 @@ fun AddNaatModal(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = "Add New Notebook Entry",
+                text = if (editingNaat != null) "Edit Notebook Entry" else "Add New Notebook Entry",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
@@ -1010,6 +1055,46 @@ fun AddNaatModal(
             shape = RoundedCornerShape(8.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
+                // Current attachment (edit mode only): kept as-is unless removed or replaced
+                val currentEditing = editingNaat
+                if (currentEditing != null && currentEditing.audioType != "none" &&
+                    activeRecordingFile == null && linkedFileUriStr == null && !existingAudioRemoved
+                ) {
+                    currentEditing.audioPath?.let { attachmentPath ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Current attachment",
+                                    color = HighContrastGray,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    text = if (currentEditing.audioType == "recorded") "🎙️ Voice note" else "🎵 Linked audio file",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            AudioAttachmentPreview(path = attachmentPath, viewModel = viewModel)
+                            IconButton(
+                                onClick = { existingAudioRemoved = true },
+                                modifier = Modifier.testTag("remove_current_attachment")
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Remove attachment",
+                                    tint = HighContrastRed,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                }
+
                 // Feature 1: In-App Voice Recorder controls
                 Text(
                     text = "Feature 1: In-App Voice Recorder",
@@ -1017,80 +1102,133 @@ fun AddNaatModal(
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    when (recordingState) {
-                        RecordingState.IDLE -> {
-                            Button(
-                                onClick = {
-                                    permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.onBackground
-                                ),
-                                modifier = Modifier.testTag("start_recording_btn")
-                            ) {
-                                Icon(Icons.Default.Mic, contentDescription = "Record")
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Tap to Record")
-                            }
-                        }
-                        RecordingState.RECORDING -> {
-                            Button(
-                                onClick = { viewModel.pauseRecording() },
-                                colors = ButtonDefaults.buttonColors(containerColor = HighContrastGray),
-                                modifier = Modifier.testTag("pause_recording_btn")
-                            ) {
-                                Text("Pause")
+                when (recordingState) {
+                    // --- Live capture: Pause/Resume + Finish, plus timer & VU meter ---
+                    RecordingState.RECORDING, RecordingState.PAUSED -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (recordingState == RecordingState.RECORDING) {
+                                Button(
+                                    onClick = { viewModel.pauseRecording() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = HighContrastGray),
+                                    modifier = Modifier.testTag("pause_recording_btn")
+                                ) {
+                                    Text("Pause")
+                                }
+                            } else {
+                                Button(
+                                    onClick = { viewModel.resumeRecording() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.onBackground),
+                                    modifier = Modifier.testTag("resume_recording_btn")
+                                ) {
+                                    Text("Resume")
+                                }
                             }
                             Button(
                                 onClick = { viewModel.stopRecording() },
                                 colors = ButtonDefaults.buttonColors(containerColor = HighContrastRed),
                                 modifier = Modifier.testTag("stop_recording_btn")
                             ) {
-                                Text("Save Voice")
+                                Text("Finish")
                             }
                         }
-                        RecordingState.PAUSED -> {
-                            Button(
-                                onClick = { viewModel.resumeRecording() },
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.onBackground),
-                                modifier = Modifier.testTag("resume_recording_btn")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = if (recordingState == RecordingState.RECORDING) "●" else "⏸",
+                                color = if (recordingState == RecordingState.RECORDING) HighContrastRed else HighContrastGray,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                text = formatTime(recordingElapsedMs.toInt()),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.testTag("recording_timer")
+                            )
+                            RecordingVuMeter(amplitude = recordingAmplitude)
+                        }
+                    }
+                    // --- Idle: start a take, or preview/discard/re-record the finished one ---
+                    RecordingState.IDLE -> {
+                        val finishedTake = activeRecordingFile
+                        if (finishedTake == null) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text("Resume")
+                                Button(
+                                    onClick = {
+                                        permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.onBackground
+                                    ),
+                                    modifier = Modifier.testTag("start_recording_btn")
+                                ) {
+                                    Icon(Icons.Default.Mic, contentDescription = "Record")
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Tap to Record")
+                                }
+                                Text(
+                                    text = "No Recording",
+                                    color = HighContrastGray,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
                             }
-                            Button(
-                                onClick = { viewModel.stopRecording() },
-                                colors = ButtonDefaults.buttonColors(containerColor = HighContrastRed),
-                                modifier = Modifier.testTag("stop_recording_btn")
+                        } else {
+                            Text(
+                                text = "✅ Recording ready: ${finishedTake.name}",
+                                color = HighContrastGray,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Text("Save Voice")
+                                AudioAttachmentPreview(
+                                    path = finishedTake.absolutePath,
+                                    viewModel = viewModel
+                                )
+                                TextButton(
+                                    onClick = { viewModel.discardRecording() },
+                                    modifier = Modifier.testTag("discard_recording_btn")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Discard recording",
+                                        tint = HighContrastRed,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Discard", color = HighContrastRed)
+                                }
+                                TextButton(
+                                    onClick = { viewModel.startRecording() },
+                                    modifier = Modifier.testTag("rerecord_btn")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Mic,
+                                        contentDescription = "Re-record",
+                                        tint = MaterialTheme.colorScheme.onBackground,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Re-record")
+                                }
                             }
                         }
                     }
-
-                    // Display recording status text
-                    Text(
-                        text = when (recordingState) {
-                            RecordingState.RECORDING -> "🎙️ Recording..."
-                            RecordingState.PAUSED -> "⏸️ Paused"
-                            else -> if (activeRecordingFile != null) "✅ Recording Attached" else "No Recording"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(start = 8.dp)
-                    )
-                }
-
-                if (activeRecordingFile != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Recorded audio: ${activeRecordingFile?.name}",
-                        color = HighContrastGray,
-                        style = MaterialTheme.typography.bodySmall
-                    )
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -1161,9 +1299,11 @@ fun AddNaatModal(
                 if (title.isBlank()) {
                     Toast.makeText(context, "Please enter a valid notebook title", Toast.LENGTH_SHORT).show()
                 } else {
-                    // Resolve audio values
+                    // Resolve audio values: a new take or link wins; otherwise the
+                    // existing attachment is kept (unless explicitly removed).
                     var audioType = "none"
                     var audioPath: String? = null
+                    val editing = editingNaat
 
                     if (activeRecordingFile != null) {
                         audioType = "recorded"
@@ -1171,17 +1311,36 @@ fun AddNaatModal(
                     } else if (linkedFileUriStr != null) {
                         audioType = "local_file"
                         audioPath = linkedFileUriStr
+                    } else if (editing != null && !existingAudioRemoved && editing.audioType != "none") {
+                        audioType = editing.audioType
+                        audioPath = editing.audioPath
                     }
 
-                    viewModel.addNaat(
-                        title = title,
-                        poet = poet,
-                        category = selectedCategory,
-                        lyrics = lyrics,
-                        audioType = audioType,
-                        audioPath = audioPath
-                    )
-                    Toast.makeText(context, "Notebook Entry Saved!", Toast.LENGTH_SHORT).show()
+                    if (editing != null) {
+                        viewModel.updateNaat(
+                            id = editing.id,
+                            title = title,
+                            poet = poet,
+                            category = selectedCategory,
+                            lyrics = lyrics,
+                            audioType = audioType,
+                            audioPath = audioPath,
+                            isFavorite = editing.isFavorite,
+                            createdAt = editing.createdAt,
+                            previousAudioPath = editing.audioPath
+                        )
+                        Toast.makeText(context, "Entry Updated!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        viewModel.addNaat(
+                            title = title,
+                            poet = poet,
+                            category = selectedCategory,
+                            lyrics = lyrics,
+                            audioType = audioType,
+                            audioPath = audioPath
+                        )
+                        Toast.makeText(context, "Notebook Entry Saved!", Toast.LENGTH_SHORT).show()
+                    }
                 }
             },
             colors = ButtonDefaults.buttonColors(
@@ -1193,7 +1352,11 @@ fun AddNaatModal(
                 .testTag("save_notebook_btn"),
             shape = RoundedCornerShape(8.dp)
         ) {
-            Text("Save Entry", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text(
+                text = if (editingNaat != null) "Save Changes" else "Save Entry",
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+            )
         }
         
         Spacer(modifier = Modifier.height(24.dp))
@@ -1397,7 +1560,17 @@ fun LyricsReaderScreen(
     viewModel: NaatViewModel,
     onClose: () -> Unit
 ) {
+    val context = LocalContext.current
     val scrollState = rememberScrollState()
+
+    // Keep the screen on while reciting — the reader must never dim mid-performance.
+    DisposableEffect(Unit) {
+        val window = (context as? Activity)?.window
+        window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
     
     // Auto-Scroll engine configurations
     var autoScrollActive by remember { mutableStateOf(false) }
@@ -1418,14 +1591,18 @@ fun LyricsReaderScreen(
         localFontSize = defaultFontSize
     }
 
-    // Auto-scroll loop engine coroutine
+    // Auto-scroll loop engine coroutine. The step is dp-based, so the pace is
+    // consistent across screen densities; it stops on its own at the bottom.
+    val density = LocalDensity.current
     LaunchedEffect(autoScrollActive, scrollSpeed) {
         if (autoScrollActive) {
             while (isActive) {
-                // Linear fluid calculations based on scroll speed factor
-                val step = (1f * scrollSpeed).toInt().coerceAtLeast(1)
-                scrollState.scrollBy(step.toFloat())
-                delay(30) // linear frame rate delay
+                val stepPx = with(density) { (1.5f * scrollSpeed).dp.toPx() }
+                scrollState.scrollBy(stepPx)
+                delay(30)
+                if (scrollState.value >= scrollState.maxValue) {
+                    autoScrollActive = false
+                }
             }
         }
     }
@@ -1482,6 +1659,18 @@ fun LyricsReaderScreen(
                         tint = if (naat.isFavorite) HighContrastRed else MaterialTheme.colorScheme.onBackground
                     )
                 }
+
+                // Edit this entry right from the reader
+                IconButton(
+                    onClick = { viewModel.startEditNaat(naat) },
+                    modifier = Modifier.testTag("reader_edit_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit entry",
+                        tint = MaterialTheme.colorScheme.onBackground
+                    )
+                }
             }
         },
         bottomBar = {
@@ -1514,12 +1703,10 @@ fun LyricsReaderScreen(
                             onClick = {
                                 if (isPlaying) {
                                     audioPlayer.pause()
+                                } else if (audioPlayer.hasActiveSession()) {
+                                    audioPlayer.resume()
                                 } else {
-                                    if (currentPos > 0) {
-                                        audioPlayer.pause() // player resumes internally with pause toggle
-                                    } else {
-                                        audioPlayer.play(naat.audioPath!!)
-                                    }
+                                    audioPlayer.play(naat.audioPath!!)
                                 }
                             },
                             modifier = Modifier.testTag("reader_play_pause")
@@ -1621,7 +1808,7 @@ fun LyricsReaderScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             listOf(1f, 1.5f, 2f).forEach { speed ->
                                 Text(
-                                    text = "${speed.toInt()}x",
+                                    text = (if (speed % 1f == 0f) speed.toInt().toString() else speed.toString()) + "x",
                                     fontSize = 11.sp,
                                     fontWeight = if (scrollSpeed == speed) FontWeight.Bold else FontWeight.Normal,
                                     color = if (scrollSpeed == speed) MaterialTheme.colorScheme.onBackground else HighContrastGray,
@@ -1685,6 +1872,77 @@ fun LyricsReaderScreen(
                 }
             }
         }
+    }
+}
+
+// --- Live VU meter for the recorder: bars light up with the mic amplitude ---
+@Composable
+fun RecordingVuMeter(
+    amplitude: Int,
+    modifier: Modifier = Modifier,
+    barCount: Int = 14
+) {
+    val normalized = (amplitude / 32767f).coerceIn(0f, 1f)
+    val animated by animateFloatAsState(targetValue = normalized, label = "vu_meter")
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.Bottom
+    ) {
+        repeat(barCount) { index ->
+            val frac = (index + 1f) / barCount
+            val isActive = animated >= frac * 0.9f
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height((6f + 16f * frac).dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(
+                        if (isActive) HighContrastRed
+                        else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.22f)
+                    )
+            )
+        }
+    }
+}
+
+// --- Inline audio preview (play/pause + position) for the add/edit modal ---
+@Composable
+fun AudioAttachmentPreview(
+    path: String,
+    viewModel: NaatViewModel
+) {
+    val player = viewModel.audioPlayer
+    val isPlaying by player.isPlaying.collectAsState()
+    val currentPos by player.currentPosition.collectAsState()
+    val duration by player.duration.collectAsState()
+    var started by remember(path) { mutableStateOf(false) }
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        IconButton(
+            onClick = {
+                when {
+                    isPlaying -> player.pause()
+                    started -> player.resume()
+                    else -> {
+                        player.play(path)
+                        started = true
+                    }
+                }
+            },
+            modifier = Modifier.testTag("audio_preview_play")
+        ) {
+            Icon(
+                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                contentDescription = if (isPlaying) "Pause preview" else "Play preview",
+                tint = MaterialTheme.colorScheme.onBackground
+            )
+        }
+        Text(
+            text = if (started) "${formatTime(currentPos)} / ${formatTime(duration)}" else "Preview",
+            style = MaterialTheme.typography.bodySmall,
+            color = HighContrastGray
+        )
     }
 }
 

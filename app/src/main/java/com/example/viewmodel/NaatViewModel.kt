@@ -9,7 +9,10 @@ import androidx.lifecycle.viewModelScope
 import com.example.audio.*
 import com.example.data.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -65,6 +68,13 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
     private val _selectedFolder = MutableStateFlow<String?>(null) // null means "All" / Folder Grid View
     val selectedFolder: StateFlow<String?> = _selectedFolder.asStateFlow()
 
+    private val _showFavoritesOnly = MutableStateFlow(false)
+    val showFavoritesOnly: StateFlow<Boolean> = _showFavoritesOnly.asStateFlow()
+
+    fun toggleFavoritesOnly() {
+        _showFavoritesOnly.value = !_showFavoritesOnly.value
+    }
+
     // App Preferences
     private val _themeMode = MutableStateFlow(prefs.getString("theme_mode", "system") ?: "system")
     val themeMode: StateFlow<String> = _themeMode.asStateFlow()
@@ -76,12 +86,13 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
     val allNaats: StateFlow<List<NaatEntity>> = repository.allNaats
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Filtered list based on Search & Folders
+    // Filtered list based on Search, Folders & the Favorites toggle
     val filteredNaats: StateFlow<List<NaatEntity>> = combine(
         allNaats,
         _searchQuery,
-        _selectedFolder
-    ) { naats, query, folder ->
+        _selectedFolder,
+        _showFavoritesOnly
+    ) { naats, query, folder, favoritesOnly ->
         naats.filter { naat ->
             val matchesFolder = if (folder != null) {
                 naat.category.equals(folder, ignoreCase = true)
@@ -95,7 +106,8 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 true
             }
-            matchesFolder && matchesSearch
+            val matchesFavorite = !favoritesOnly || naat.isFavorite
+            matchesFolder && matchesSearch && matchesFavorite
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -105,6 +117,38 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _recordingState = MutableStateFlow(RecordingState.IDLE)
     val recordingState: StateFlow<RecordingState> = _recordingState.asStateFlow()
+
+    // Live recording meter (elapsed time + amplitude for the VU meter)
+    private val _recordingElapsedMs = MutableStateFlow(0L)
+    val recordingElapsedMs: StateFlow<Long> = _recordingElapsedMs.asStateFlow()
+
+    private val _recordingAmplitude = MutableStateFlow(0)
+    val recordingAmplitude: StateFlow<Int> = _recordingAmplitude.asStateFlow()
+
+    private var recordingMeterJob: Job? = null
+
+    // Entry currently being edited in the modal (null = "add new" mode)
+    private val _editingNaat = MutableStateFlow<NaatEntity?>(null)
+    val editingNaat: StateFlow<NaatEntity?> = _editingNaat.asStateFlow()
+
+    private fun startRecordingMeter() {
+        recordingMeterJob?.cancel()
+        _recordingElapsedMs.value = 0L
+        recordingMeterJob = viewModelScope.launch {
+            while (isActive) {
+                _recordingElapsedMs.value = audioRecorder.getElapsedMs()
+                _recordingAmplitude.value = audioRecorder.getMaxAmplitude()
+                delay(120)
+            }
+        }
+    }
+
+    private fun stopRecordingMeter() {
+        recordingMeterJob?.cancel()
+        recordingMeterJob = null
+        _recordingElapsedMs.value = 0L
+        _recordingAmplitude.value = 0
+    }
 
     // Backup & Restore status notifications
     private val _statusMessage = MutableStateFlow<String?>(null)
@@ -129,15 +173,20 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
             }
             _activeRecordingFile.value = null
             _recordingState.value = RecordingState.IDLE
+            _editingNaat.value = null
             audioRecorder.stop()
+            audioPlayer.stop() // stops any in-modal audio preview
+            stopRecordingMeter()
         }
     }
 
     fun selectNaat(naat: NaatEntity?) {
-        _selectedNaat.value = naat
-        if (naat == null) {
+        // Stop playback when leaving the reader OR switching to a different entry,
+        // otherwise the previous entry's audio keeps bleeding into the new screen.
+        if (naat == null || naat.id != _selectedNaat.value?.id) {
             audioPlayer.stop()
         }
+        _selectedNaat.value = naat
     }
 
     fun selectFolder(folder: String?) {
@@ -162,16 +211,21 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         _activeRecordingFile.value?.let { old ->
             if (old.exists()) viewModelScope.launch(Dispatchers.IO) { old.delete() }
         }
+        audioPlayer.stop() // stop any preview before capturing a fresh take
         val timestamp = System.currentTimeMillis()
         val file = File(getRecordingsDirectory(), "record_$timestamp.m4a")
         _activeRecordingFile.value = file
         audioRecorder.start(file)
         _recordingState.value = audioRecorder.getRecordingState()
+        if (_recordingState.value == RecordingState.RECORDING) {
+            startRecordingMeter()
+        }
     }
 
     fun pauseRecording() {
         audioRecorder.pause()
         _recordingState.value = audioRecorder.getRecordingState()
+        _recordingAmplitude.value = 0 // VU meter flattens while paused
     }
 
     fun resumeRecording() {
@@ -182,6 +236,26 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
     fun stopRecording() {
         audioRecorder.stop()
         _recordingState.value = RecordingState.IDLE
+        stopRecordingMeter()
+    }
+
+    /** Discard the finished take: stop playback, delete the file, reset state. */
+    fun discardRecording() {
+        audioRecorder.stop()
+        audioPlayer.stop()
+        _recordingState.value = RecordingState.IDLE
+        stopRecordingMeter()
+        _activeRecordingFile.value?.let { file ->
+            if (file.exists()) viewModelScope.launch(Dispatchers.IO) { file.delete() }
+        }
+        _activeRecordingFile.value = null
+    }
+
+    /** Open the add/edit modal pre-filled with an existing entry. */
+    fun startEditNaat(naat: NaatEntity) {
+        audioPlayer.stop()
+        _editingNaat.value = naat
+        _showAddModal.value = true
     }
 
     // --- Local Device File Attachment ---
@@ -271,6 +345,67 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Full edit of an existing entry. Attachments are preserved unless the user
+     * recorded a new take, linked a new file, or removed the attachment — in which
+     * case the previous app-owned audio file is deleted.
+     */
+    fun updateNaat(
+        id: Int,
+        title: String,
+        poet: String?,
+        category: String,
+        lyrics: String?,
+        audioType: String,
+        audioPath: String?,
+        isFavorite: Boolean,
+        createdAt: Long,
+        previousAudioPath: String?
+    ) {
+        audioRecorder.stop()
+        audioPlayer.stop()
+        _recordingState.value = RecordingState.IDLE
+        stopRecordingMeter()
+
+        val finalAudioPath = if (audioType == "recorded" && audioPath != null) {
+            val f = File(audioPath)
+            if (f.exists() && f.length() > 0L) audioPath else {
+                f.delete()
+                null
+            }
+        } else {
+            audioPath
+        }
+        val finalAudioType = if (audioType == "recorded" && finalAudioPath == null) "none" else audioType
+
+        viewModelScope.launch {
+            val updated = NaatEntity(
+                id = id,
+                title = title,
+                poet = if (poet.isNullOrBlank()) null else poet,
+                category = category,
+                lyrics = if (lyrics.isNullOrBlank()) null else lyrics,
+                audioType = finalAudioType,
+                audioPath = finalAudioPath,
+                isFavorite = isFavorite,
+                createdAt = createdAt
+            )
+            repository.update(updated)
+            // Delete the replaced/removed audio file (only if app-owned and actually changed)
+            if (!previousAudioPath.isNullOrEmpty() && previousAudioPath != finalAudioPath) {
+                val old = File(previousAudioPath)
+                if (old.exists() && old.absolutePath.startsWith(context.filesDir.absolutePath)) {
+                    old.delete()
+                }
+            }
+            if (_selectedNaat.value?.id == id) {
+                _selectedNaat.value = updated // keep an open reader in sync
+            }
+            _activeRecordingFile.value = null
+            setShowAddModal(false)
+        }
+    }
+
     fun toggleFavorite(naat: NaatEntity) {
         viewModelScope.launch {
             val updated = naat.copy(isFavorite = !naat.isFavorite)
@@ -340,9 +475,23 @@ class NaatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Called when the app goes to the background: stop playback and finalize any
+     * in-progress take so the recording stays complete and previewable on return.
+     */
+    fun onAppBackgrounded() {
+        audioPlayer.stop()
+        if (_recordingState.value != RecordingState.IDLE) {
+            audioRecorder.stop()
+            _recordingState.value = RecordingState.IDLE
+            stopRecordingMeter()
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
-        audioPlayer.stop()
+        audioPlayer.release() // stops playback AND cancels the player coroutine scope
         audioRecorder.stop()
+        stopRecordingMeter()
     }
 }
