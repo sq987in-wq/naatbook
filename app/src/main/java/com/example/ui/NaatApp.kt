@@ -10,6 +10,8 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +25,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -45,6 +48,8 @@ private object NaatRoutes {
     const val EDITOR = "editor"
 }
 
+private const val TOP_LEVEL_FADE_MILLIS = 140
+
 @Composable
 fun NaatApp(viewModel: NaatViewModel) {
     val context = LocalContext.current
@@ -52,7 +57,6 @@ fun NaatApp(viewModel: NaatViewModel) {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
-    val currentTab by viewModel.currentTab.collectAsState()
     val showAddModal by viewModel.showAddModal.collectAsState()
     val selectedNaat by viewModel.selectedNaat.collectAsState()
     val themeMode by viewModel.themeMode.collectAsState()
@@ -119,6 +123,8 @@ fun NaatApp(viewModel: NaatViewModel) {
             val showBottomBar = currentRoute == null ||
                 currentRoute == NaatRoutes.LIBRARY || currentRoute == NaatRoutes.SETTINGS
             Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                contentColor = MaterialTheme.colorScheme.onBackground,
                 bottomBar = {
                     if (showBottomBar) {
                         Column {
@@ -134,7 +140,9 @@ fun NaatApp(viewModel: NaatViewModel) {
                                 }
                             )
                             NaatBottomNavigation(
-                                currentTab = currentTab,
+                                // Navigation is the source of truth for selection;
+                                // this also stays correct after back-stack restore.
+                                currentTab = if (currentRoute == NaatRoutes.SETTINGS) 2 else 0,
                                 onTabSelected = { tab ->
                                     navigateToTab(tab, viewModel, navController)
                                 }
@@ -149,6 +157,10 @@ fun NaatApp(viewModel: NaatViewModel) {
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding)
+                        // Keep a themed layer behind both destinations throughout
+                        // their crossfade; otherwise a transparent animation frame
+                        // can expose the Activity window (black in light mode).
+                        .background(MaterialTheme.colorScheme.background)
                 )
             }
         }
@@ -170,14 +182,60 @@ private fun NaatNavHost(
         popEnterTransition = { EnterTransition.None },
         popExitTransition = { ExitTransition.None }
     ) {
-        composable(NaatRoutes.LIBRARY) {
+        composable(
+            route = NaatRoutes.LIBRARY,
+            enterTransition = {
+                if (initialState.destination.route == NaatRoutes.SETTINGS) {
+                    fadeIn(tween(TOP_LEVEL_FADE_MILLIS))
+                } else {
+                    EnterTransition.None
+                }
+            },
+            exitTransition = {
+                if (targetState.destination.route == NaatRoutes.SETTINGS) {
+                    fadeOut(tween(TOP_LEVEL_FADE_MILLIS))
+                } else {
+                    ExitTransition.None
+                }
+            },
+            popEnterTransition = {
+                if (initialState.destination.route == NaatRoutes.SETTINGS) {
+                    fadeIn(tween(TOP_LEVEL_FADE_MILLIS))
+                } else {
+                    EnterTransition.None
+                }
+            }
+        ) {
             LibraryScreen(
                 viewModel = viewModel,
                 onOpenReader = { naat -> openReader(naat, viewModel, navController) },
                 onEdit = { naat -> openEditor(naat, viewModel, navController) }
             )
         }
-        composable(NaatRoutes.SETTINGS) {
+        composable(
+            route = NaatRoutes.SETTINGS,
+            enterTransition = {
+                if (initialState.destination.route == NaatRoutes.LIBRARY) {
+                    fadeIn(tween(TOP_LEVEL_FADE_MILLIS))
+                } else {
+                    EnterTransition.None
+                }
+            },
+            exitTransition = {
+                if (targetState.destination.route == NaatRoutes.LIBRARY) {
+                    fadeOut(tween(TOP_LEVEL_FADE_MILLIS))
+                } else {
+                    ExitTransition.None
+                }
+            },
+            popExitTransition = {
+                if (targetState.destination.route == NaatRoutes.LIBRARY) {
+                    fadeOut(tween(TOP_LEVEL_FADE_MILLIS))
+                } else {
+                    ExitTransition.None
+                }
+            }
+        ) {
             SettingsScreen(viewModel = viewModel)
         }
         composable(
@@ -212,14 +270,32 @@ private fun navigateToTab(
     viewModel: NaatViewModel,
     navController: NavHostController
 ) {
-    viewModel.selectTab(tab)
-    when (tab) {
-        0 -> navController.navigate(NaatRoutes.LIBRARY) {
-            popUpTo(NaatRoutes.LIBRARY) { inclusive = false }
+    val targetRoute = when (tab) {
+        0 -> NaatRoutes.LIBRARY
+        2 -> NaatRoutes.SETTINGS
+        else -> null
+    }
+
+    if (targetRoute != null) {
+        // launchSingleTop alone still dispatches a navigation operation and can
+        // restart destination transitions on some Navigation-Compose versions.
+        // Make reselecting the active tab a strict no-op before mutating UI state.
+        if (navController.currentDestination?.route == targetRoute) return
+
+        viewModel.selectTab(tab)
+        navController.navigate(targetRoute) {
+            popUpTo(navController.graph.findStartDestination().id) {
+                saveState = true
+            }
             launchSingleTop = true
+            restoreState = true
         }
-        1 -> navController.navigate(NaatRoutes.EDITOR) { launchSingleTop = true }
-        2 -> navController.navigate(NaatRoutes.SETTINGS) { launchSingleTop = true }
+        return
+    }
+
+    if (tab == 1 && navController.currentDestination?.route != NaatRoutes.EDITOR) {
+        viewModel.selectTab(tab)
+        navController.navigate(NaatRoutes.EDITOR) { launchSingleTop = true }
     }
 }
 

@@ -103,7 +103,10 @@ fun NaatBottomNavigation(
                     .clickable(
                         interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                         indication = null,
-                        onClick = { onTabSelected(0) }
+                        // Active destinations are deliberately inert: dispatching
+                        // another navigate() for the same route restarts its
+                        // transition and causes a visible full-screen flash.
+                        onClick = { if (!isLibrarySelected) onTabSelected(0) }
                     )
                     .testTag("nav_tab_library"),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -168,7 +171,7 @@ fun NaatBottomNavigation(
                     .clickable(
                         interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                         indication = null,
-                        onClick = { onTabSelected(2) }
+                        onClick = { if (!isSettingsSelected) onTabSelected(2) }
                     )
                     .testTag("nav_tab_settings"),
                 horizontalAlignment = Alignment.CenterHorizontally,
