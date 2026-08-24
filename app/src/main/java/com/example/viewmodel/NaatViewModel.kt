@@ -173,8 +173,8 @@ class NaatViewModel @Inject constructor(
 
     // Preferences & Settings are DataStore-backed; legacy values migrate in once.
 
-    // UI Navigation Screen State
-    private val _currentTab = MutableStateFlow(0) // 0: Library, 1: Add (via modal), 2: Settings
+    // UI Navigation Screen State. Add is a transient FAB action, not a tab.
+    private val _currentTab = MutableStateFlow(0) // 0: Library, 2: Settings
     val currentTab: StateFlow<Int> = _currentTab.asStateFlow()
 
     private val _showAddModal = MutableStateFlow(initialDraft.active)
@@ -373,7 +373,9 @@ class NaatViewModel @Inject constructor(
     }
 
     fun selectTab(index: Int) {
-        if (index == 1) startAddDraft(forceFresh = true) else _currentTab.value = index
+        // Library and Settings are persistent top-level tabs. Add is intentionally
+        // opened only through startAddDraft from the docked FAB.
+        if (index == 0 || index == 2) _currentTab.value = index
     }
 
     /** Explicit cancellation/discard. Recorder finalization always precedes file cleanup. */

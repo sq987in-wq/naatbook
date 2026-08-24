@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +34,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
@@ -60,6 +63,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -81,14 +89,19 @@ import com.example.viewmodel.NaatViewModel
 
 /** Keyed lazy editor: only visible sections are composed and high-frequency media state is local. */
 @Composable
-fun AddNaatModal(viewModel: NaatViewModel, onClose: () -> Unit) {
+fun AddNaatModal(
+    viewModel: NaatViewModel,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // The ModalBottomSheet owns window/status insets and constrains this list's
+    // height. Keeping a single LazyColumn avoids nested scroll jank with the IME.
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
+        modifier = modifier
+            .fillMaxWidth()
             .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
             .imePadding(),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item(key = "header") { EditorHeader(viewModel, onClose) }
@@ -144,6 +157,8 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
         }
     }
 
+    val folderState = if (showCategoryDropdown) "expanded" else "collapsed"
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         OutlinedTextField(
             value = metadata.title,
@@ -162,17 +177,39 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
             singleLine = true
         )
         Box(Modifier.fillMaxWidth()) {
+            // The read-only field stays visually consistent with the rest of the
+            // editor. A single full-size semantic overlay owns all activation so
+            // every part of the input—not just the trailing affordance—opens it.
             OutlinedTextField(
                 value = metadata.category,
                 onValueChange = {},
                 readOnly = true,
                 label = { Text("Folder Location") },
                 trailingIcon = {
-                    IconButton(onClick = { showCategoryDropdown = true }) {
-                        Icon(Icons.Default.MusicNote, contentDescription = "Choose folder")
-                    }
+                    Icon(
+                        imageVector = if (showCategoryDropdown) {
+                            Icons.Default.KeyboardArrowUp
+                        } else {
+                            Icons.Default.KeyboardArrowDown
+                        },
+                        contentDescription = null
+                    )
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clearAndSetSemantics { }
+            )
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "Folder Location"
+                        stateDescription = "${metadata.category}, $folderState"
+                    }
+                    .clickable(role = Role.DropdownList) {
+                        showCategoryDropdown = !showCategoryDropdown
+                    }
+                    .testTag("folder_location_dropdown")
             )
             DropdownMenu(
                 expanded = showCategoryDropdown,
@@ -192,7 +229,8 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
         OutlinedTextField(
             value = metadata.lyrics,
             onValueChange = { value -> viewModel.updateDraft { it.copy(lyrics = value) } },
-            label = { Text("Lyrics Text Area (Optional)") },
+            label = { Text("Lyrics") },
+            placeholder = { Text("Add lyrics here...") },
             textStyle = LocalTextStyle.current.copy(
                 fontFamily = if (usesArabicScript(metadata.lyrics)) NastaliqFamily else FontFamily.Default,
                 lineHeight = if (usesArabicScript(metadata.lyrics)) 32.sp else LocalTextStyle.current.lineHeight
