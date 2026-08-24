@@ -2,6 +2,8 @@ package com.example.audio
 
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.annotation.MainThread
 import androidx.media3.common.AudioAttributes
@@ -60,6 +62,8 @@ class Media3PlaybackEngine @Inject constructor(
     private var progressJob: Job? = null
     private var released = false
     private var clearing = false
+    private var playbackGeneration = 0L
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     init {
         player.addListener(object : Player.Listener {
@@ -69,13 +73,13 @@ class Media3PlaybackEngine @Inject constructor(
                 publishState()
                 if (playbackState == Player.STATE_READY) startProgressTracking()
                 if (Media3TerminalPolicy.shouldStop(playbackState, player.mediaItemCount, clearing)) {
-                    stop()
+                    scheduleTerminalStop()
                 }
             }
 
             override fun onPlayerError(error: PlaybackException) {
                 Log.e(TAG, "Media3 playback failed", error)
-                stop()
+                scheduleTerminalStop()
             }
         })
     }
@@ -90,6 +94,7 @@ class Media3PlaybackEngine @Inject constructor(
     ) {
         check(!released) { "Playback engine has been released" }
         clear(notifyPreviousOwner)
+        playbackGeneration++
         val uri = when {
             audioPath.startsWith("content://") -> Uri.parse(audioPath)
             else -> Uri.fromFile(File(audioPath))
@@ -138,6 +143,7 @@ class Media3PlaybackEngine @Inject constructor(
     fun stop() = clear(notifyOwner = true)
 
     private fun clear(notifyOwner: Boolean) {
+        playbackGeneration++ // invalidate every terminal callback queued for the old item
         val hadSession = hasActiveSession()
         try {
             clearing = true
@@ -155,6 +161,18 @@ class Media3PlaybackEngine @Inject constructor(
             _isPreparing.value = false
             _hasActiveSession.value = false
             if (hadSession && notifyOwner) onSessionStopped?.invoke()
+        }
+    }
+
+    /** Never mutate/release MediaSession listeners from inside ExoPlayer's event dispatch. */
+    private fun scheduleTerminalStop() {
+        val generation = playbackGeneration
+        mainHandler.post {
+            if (!released && generation == playbackGeneration && hasActiveSession() &&
+                Media3TerminalPolicy.shouldStop(player.playbackState, player.mediaItemCount, clearing)
+            ) {
+                stop()
+            }
         }
     }
 

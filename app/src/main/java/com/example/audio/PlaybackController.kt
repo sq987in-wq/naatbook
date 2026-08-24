@@ -1,6 +1,7 @@
 package com.example.audio
 
 import android.content.Context
+import android.util.Log
 import com.example.data.NaatEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -13,7 +14,8 @@ import javax.inject.Singleton
 data class NowPlaying(
     val naatId: Int,
     val title: String,
-    val poet: String?
+    val poet: String?,
+    val audioPath: String
 )
 
 /** Process-wide ownership boundary around the shared Media3 player. */
@@ -44,16 +46,22 @@ class PlaybackController @Inject constructor(
 
     fun playEntry(naat: NaatEntity) {
         val path = naat.audioPath ?: return
-        engine.play(
-            audioPath = path,
-            mediaId = "naat:${naat.id}",
-            title = naat.title,
-            artist = naat.poet
-        )
-        if (!engine.hasActiveSession()) return
+        playEntry(naat, path)
+    }
+
+    fun playEntry(naat: NaatEntity, path: String) {
+        // The service creates MediaSession before replacing the current item. Keeping an
+        // existing service alive avoids a stop/start race between consecutive entry requests.
         _previewPath.value = null
-        _nowPlaying.value = NowPlaying(naat.id, naat.title, naat.poet)
-        MediaPlaybackService.start(context)
+        _nowPlaying.value = NowPlaying(naat.id, naat.title, naat.poet, path)
+        try {
+            MediaPlaybackService.playEntry(context, path, naat.id, naat.title, naat.poet)
+        } catch (error: Exception) {
+            _nowPlaying.value = null
+            engine.stop()
+            MediaPlaybackService.stop(context)
+            Log.e("PlaybackController", "Unable to start background playback", error)
+        }
     }
 
     fun playPreview(path: String) {

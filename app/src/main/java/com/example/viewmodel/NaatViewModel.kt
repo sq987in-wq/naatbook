@@ -32,6 +32,9 @@ data class EditorDraft(
     val existingAudioRemoved: Boolean = false,
     val existingAudioType: String = "none",
     val existingAudioPath: String? = null,
+    val existingSecondaryAudioRemoved: Boolean = false,
+    val existingSecondaryAudioType: String = "none",
+    val existingSecondaryAudioPath: String? = null,
     val existingFavorite: Boolean = false,
     val existingCreatedAt: Long = 0L,
     val newAttachmentPath: String? = null,
@@ -70,7 +73,10 @@ class NaatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val referenced = buildSet {
-                    addAll(repository.allNaats.first().mapNotNull { it.audioPath })
+                    repository.allNaats.first().forEach { naat ->
+                        naat.audioPath?.let(::add)
+                        naat.secondaryAudioPath?.let(::add)
+                    }
                     initialDraft.newAttachmentPath?.let(::add)
                     initialDraft.finishedRecordingPath?.let(::add)
                 }
@@ -227,15 +233,29 @@ class NaatViewModel @Inject constructor(
 
     private fun clearDraft() = persistDraft(EditorDraft())
 
-    fun startAddDraft() {
-        if (_editorDraft.value.active) return // rotation/recomposition must not overwrite work
+    fun startAddDraft(forceFresh: Boolean = false) {
+        if (_editorDraft.value.active && !forceFresh) return
+        if (forceFresh) {
+            // '+' is an explicit new-entry action, never a request to reuse an old edit draft.
+            audioRecorder.stop()
+            _recordingState.value = RecordingState.IDLE
+            stopRecordingMeter()
+            playbackController.stopPreview()
+            val old = _editorDraft.value
+            DraftFileCleanup.discard(
+                old.existingAudioPath,
+                listOf(_activeRecordingFile.value?.absolutePath,
+                    old.finishedRecordingPath, old.newAttachmentPath)
+            )
+            _activeRecordingFile.value = null
+        }
         persistDraft(EditorDraft(active = true))
         _editingNaat.value = null
         _showAddModal.value = true
     }
 
     fun selectTab(index: Int) {
-        if (index == 1) startAddDraft() else _currentTab.value = index
+        if (index == 1) startAddDraft(forceFresh = true) else _currentTab.value = index
     }
 
     /** Explicit cancellation/discard. Recorder finalization always precedes file cleanup. */
@@ -281,7 +301,11 @@ class NaatViewModel @Inject constructor(
 
     /** Starts a media-session-owned listening session for an entry (from the reader). */
     fun startEntryPlayback(naat: NaatEntity) {
-        playbackController.playEntry(naat)
+        naat.audioPath?.let { playbackController.playEntry(naat, it) }
+    }
+
+    fun startEntryPlayback(naat: NaatEntity, path: String) {
+        playbackController.playEntry(naat, path)
     }
 
     /** Mini-player tap: resolve through Room; the list flow may still hold its initial empty value. */
@@ -330,18 +354,13 @@ class NaatViewModel @Inject constructor(
 
     fun startRecording() {
         val draft = _editorDraft.value
-        setOfNotNull(_activeRecordingFile.value?.absolutePath, draft.finishedRecordingPath,
-            draft.newAttachmentPath).filter { it != draft.existingAudioPath }.forEach {
-            try { File(it).delete() } catch (_: Exception) {}
-        }
+        setOfNotNull(_activeRecordingFile.value?.absolutePath, draft.finishedRecordingPath)
+            .filter { it != draft.existingAudioPath && it != draft.existingSecondaryAudioPath }
+            .forEach { try { File(it).delete() } catch (_: Exception) {} }
         playbackController.stop() // prevent playback feedback while capturing a fresh take
         val file = File(getRecordingsDirectory(), "record_${System.currentTimeMillis()}.m4a")
         _activeRecordingFile.value = file
-        persistDraft(draft.copy(
-            finishedRecordingPath = file.absolutePath,
-            newAttachmentPath = null,
-            newAttachmentName = null
-        ))
+        persistDraft(draft.copy(finishedRecordingPath = file.absolutePath))
         audioRecorder.start(file)
         _recordingState.value = audioRecorder.getRecordingState()
         if (_recordingState.value == RecordingState.RECORDING) {
@@ -399,6 +418,17 @@ class NaatViewModel @Inject constructor(
         playbackController.stop()
         val current = _editorDraft.value
         if (!current.active || current.editingId != naat.id) {
+            if (current.active) {
+                audioRecorder.stop()
+                stopRecordingMeter()
+                DraftFileCleanup.discard(
+                    current.existingAudioPath,
+                    listOf(_activeRecordingFile.value?.absolutePath,
+                        current.finishedRecordingPath, current.newAttachmentPath)
+                )
+                _activeRecordingFile.value = null
+                _recordingState.value = RecordingState.IDLE
+            }
             persistDraft(EditorDraft(
                 active = true,
                 editingId = naat.id,
@@ -408,6 +438,8 @@ class NaatViewModel @Inject constructor(
                 lyrics = naat.lyrics.orEmpty(),
                 existingAudioType = naat.audioType,
                 existingAudioPath = naat.audioPath,
+                existingSecondaryAudioType = naat.secondaryAudioType,
+                existingSecondaryAudioPath = naat.secondaryAudioPath,
                 existingFavorite = naat.isFavorite,
                 existingCreatedAt = naat.createdAt
             ))
@@ -459,20 +491,16 @@ class NaatViewModel @Inject constructor(
 
     /** Transfers a copied file into draft ownership and removes any superseded temporary file. */
     fun adoptLinkedFile(file: File) {
-        audioRecorder.stop()
-        _recordingState.value = RecordingState.IDLE
-        stopRecordingMeter()
+        if (_recordingState.value != RecordingState.IDLE) stopRecording()
         playbackController.stopPreview()
         val draft = _editorDraft.value
-        setOfNotNull(draft.newAttachmentPath, draft.finishedRecordingPath,
-            _activeRecordingFile.value?.absolutePath).filter {
-            it != draft.existingAudioPath && it != file.absolutePath
-        }.forEach { try { File(it).delete() } catch (_: Exception) {} }
-        _activeRecordingFile.value = null
+        draft.newAttachmentPath?.takeIf {
+            it != draft.existingAudioPath && it != draft.existingSecondaryAudioPath &&
+                it != file.absolutePath
+        }?.let { try { File(it).delete() } catch (_: Exception) {} }
         persistDraft(draft.copy(
             newAttachmentPath = file.absolutePath,
-            newAttachmentName = "Attached file: ${file.name}",
-            finishedRecordingPath = null
+            newAttachmentName = "Attached file: ${file.name}"
         ))
     }
 
@@ -501,32 +529,29 @@ class NaatViewModel @Inject constructor(
             stopRecordingMeter()
         }
         val draft = _editorDraft.value
-        val recordingPath = draft.finishedRecordingPath?.takeIf {
+        val finishedRecording = draft.finishedRecordingPath?.takeIf {
             File(it).let { file -> file.isFile && file.length() > 0L }
         }
-        if (draft.finishedRecordingPath != null && recordingPath == null) {
+        if (draft.finishedRecordingPath != null && finishedRecording == null) {
             try { File(draft.finishedRecordingPath).delete() } catch (_: Exception) {}
         }
-        val audioType: String
-        val audioPath: String?
-        when {
-            recordingPath != null -> {
-                audioType = "recorded"
-                audioPath = recordingPath
-            }
-            draft.newAttachmentPath != null -> {
-                audioType = "local_file"
-                audioPath = draft.newAttachmentPath
-            }
-            draft.editingId != null && !draft.existingAudioRemoved && draft.existingAudioType != "none" -> {
-                audioType = draft.existingAudioType
-                audioPath = draft.existingAudioPath
-            }
-            else -> {
-                audioType = "none"
-                audioPath = null
-            }
+
+        fun existingPath(type: String): String? = when {
+            !draft.existingAudioRemoved && draft.existingAudioType == type -> draft.existingAudioPath
+            !draft.existingSecondaryAudioRemoved && draft.existingSecondaryAudioType == type ->
+                draft.existingSecondaryAudioPath
+            else -> null
         }
+        val recordingPath = finishedRecording ?: existingPath("recorded")
+        val linkedPath = draft.newAttachmentPath ?: existingPath("local_file")
+        val audioType = when {
+            recordingPath != null -> "recorded"
+            linkedPath != null -> "local_file"
+            else -> "none"
+        }
+        val audioPath = recordingPath ?: linkedPath
+        val secondaryAudioType = if (recordingPath != null && linkedPath != null) "local_file" else "none"
+        val secondaryAudioPath = if (secondaryAudioType == "local_file") linkedPath else null
 
         viewModelScope.launch {
             try {
@@ -538,7 +563,9 @@ class NaatViewModel @Inject constructor(
                         lyrics = draft.lyrics.takeIf { it.isNotBlank() },
                         audioType = audioType,
                         audioPath = audioPath,
-                        isFavorite = false
+                        isFavorite = false,
+                        secondaryAudioType = secondaryAudioType,
+                        secondaryAudioPath = secondaryAudioPath
                     )
                     val id = repository.insert(entity).toInt()
                     entity.copy(id = id)
@@ -552,7 +579,9 @@ class NaatViewModel @Inject constructor(
                         audioType = audioType,
                         audioPath = audioPath,
                         isFavorite = draft.existingFavorite,
-                        createdAt = draft.existingCreatedAt
+                        createdAt = draft.existingCreatedAt,
+                        secondaryAudioType = secondaryAudioType,
+                        secondaryAudioPath = secondaryAudioPath
                     )
                     repository.update(entity)
                     entity
@@ -564,10 +593,15 @@ class NaatViewModel @Inject constructor(
                 _editingNaat.value = null
                 _showAddModal.value = false
                 _recordingState.value = RecordingState.IDLE
-                if (draft.existingAudioPath != null && draft.existingAudioPath != audioPath) {
-                    try { deleteAudioIfUnreferenced(draft.existingAudioPath) }
-                    catch (e: Exception) { Log.w("NaatViewModel", "Saved, but old audio cleanup failed", e) }
-                }
+                val retainedPaths = setOfNotNull(audioPath, secondaryAudioPath)
+                setOfNotNull(draft.existingAudioPath, draft.existingSecondaryAudioPath)
+                    .filter { it !in retainedPaths }
+                    .forEach { oldPath ->
+                        try { deleteAudioIfUnreferenced(oldPath) }
+                        catch (e: Exception) {
+                            Log.w("NaatViewModel", "Saved, but old audio cleanup failed", e)
+                        }
+                    }
                 if (_selectedNaat.value?.id == saved.id) _selectedNaat.value = saved
                 _statusMessage.value = if (draft.editingId == null) {
                     "Notebook Entry Saved!"
@@ -607,8 +641,12 @@ class NaatViewModel @Inject constructor(
             try {
                 repository.delete(naat)
                 if (playbackController.nowPlaying.value?.naatId == naat.id) playbackController.stop()
-                try { naat.audioPath?.let { deleteAudioIfUnreferenced(it) } }
-                catch (e: Exception) { Log.w("NaatViewModel", "Deleted row, but audio cleanup failed", e) }
+                try {
+                    setOfNotNull(naat.audioPath, naat.secondaryAudioPath)
+                        .forEach { deleteAudioIfUnreferenced(it) }
+                } catch (e: Exception) {
+                    Log.w("NaatViewModel", "Deleted row, but audio cleanup failed", e)
+                }
                 if (_selectedNaat.value?.id == naat.id) _selectedNaat.value = null
                 _statusMessage.value = "Entry deleted"
                 onSuccess()

@@ -89,7 +89,9 @@ fun AddNaatModal(
             audioType = draft.existingAudioType,
             audioPath = draft.existingAudioPath,
             isFavorite = draft.existingFavorite,
-            createdAt = draft.existingCreatedAt
+            createdAt = draft.existingCreatedAt,
+            secondaryAudioType = draft.existingSecondaryAudioType,
+            secondaryAudioPath = draft.existingSecondaryAudioPath
         )
     }
 
@@ -312,48 +314,52 @@ fun AddNaatModal(
             shape = RoundedCornerShape(8.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                // Current attachment (edit mode only): kept as-is unless removed or replaced
-                val currentEditing = editingNaat
-                if (currentEditing != null && currentEditing.audioType != "none" &&
-                    activeRecordingFile == null && linkedFileUriStr == null && !existingAudioRemoved
-                ) {
-                    currentEditing.audioPath?.let { attachmentPath ->
+                // Existing voice and linked slots are independent and can both be retained.
+                val existingAttachments = listOf(
+                    Triple(draft.existingAudioType, draft.existingAudioPath, false),
+                    Triple(draft.existingSecondaryAudioType, draft.existingSecondaryAudioPath, true)
+                )
+                existingAttachments.forEach { (type, path, secondary) ->
+                    val removed = if (secondary) draft.existingSecondaryAudioRemoved else existingAudioRemoved
+                    val replaced = (type == "recorded" && activeRecordingFile != null) ||
+                        (type == "local_file" && linkedFileUriStr != null)
+                    if (type != "none" && path != null && !removed && !replaced) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Current attachment",
-                                    color = HighContrastGray,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
+                                Text("Current attachment", color = HighContrastGray,
+                                    style = MaterialTheme.typography.bodySmall)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
-                                        imageVector = if (currentEditing.audioType == "recorded") Icons.Default.Mic else Icons.Default.MusicNote,
+                                        imageVector = if (type == "recorded") Icons.Default.Mic else Icons.Default.MusicNote,
                                         contentDescription = null,
                                         tint = HighContrastGray,
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = if (currentEditing.audioType == "recorded") "Voice note" else "Linked audio file",
+                                        if (type == "recorded") "Voice note" else "Linked audio file",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 }
                             }
-                            AudioAttachmentPreview(path = attachmentPath, viewModel = viewModel)
+                            AudioAttachmentPreview(path = path, viewModel = viewModel)
                             IconButton(
-                                onClick = { viewModel.updateDraft { it.copy(existingAudioRemoved = true) } },
-                                modifier = Modifier.testTag("remove_current_attachment")
-                            ) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "Remove attachment",
-                                    tint = HighContrastRed,
-                                    modifier = Modifier.size(20.dp)
+                                onClick = {
+                                    viewModel.updateDraft {
+                                        if (secondary) it.copy(existingSecondaryAudioRemoved = true)
+                                        else it.copy(existingAudioRemoved = true)
+                                    }
+                                },
+                                modifier = Modifier.testTag(
+                                    if (secondary) "remove_secondary_attachment" else "remove_current_attachment"
                                 )
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Remove attachment",
+                                    tint = HighContrastRed, modifier = Modifier.size(20.dp))
                             }
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline)

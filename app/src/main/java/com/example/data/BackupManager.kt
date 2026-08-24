@@ -58,7 +58,8 @@ class BackupManager @Inject constructor(
 
     private data class PackedAudio(val relativePath: String, val source: File)
     private data class ExportAudioIndex(
-        val relativePathByNaatId: Map<Int, String>,
+        val primaryPathByNaatId: Map<Int, String>,
+        val secondaryPathByNaatId: Map<Int, String>,
         val uniqueFiles: Collection<PackedAudio>
     )
     private data class StagedArchive(
@@ -100,7 +101,12 @@ class BackupManager @Inject constructor(
                     put("category", naat.category)
                     put("lyrics", naat.lyrics ?: JSONObject.NULL)
                     put("audioType", naat.audioType)
-                    put("audioPath", audioIndex.relativePathByNaatId[naat.id] ?: JSONObject.NULL)
+                    put("audioPath", audioIndex.primaryPathByNaatId[naat.id] ?: JSONObject.NULL)
+                    put("secondaryAudioType", naat.secondaryAudioType)
+                    put(
+                        "secondaryAudioPath",
+                        audioIndex.secondaryPathByNaatId[naat.id] ?: JSONObject.NULL
+                    )
                     put("isFavorite", naat.isFavorite)
                     put("createdAt", naat.createdAt)
                 })
@@ -147,13 +153,15 @@ class BackupManager @Inject constructor(
     }
 
     private fun buildAudioIndex(naats: List<NaatEntity>): ExportAudioIndex {
-        val relativeByNaatId = mutableMapOf<Int, String>()
+        val primary = mutableMapOf<Int, String>()
+        val secondary = mutableMapOf<Int, String>()
         val relativeByCanonicalSource = mutableMapOf<String, String>()
         val packedByDigest = linkedMapOf<String, PackedAudio>()
-        naats.forEach { naat ->
-            val source = naat.audioPath?.let(::safeAudioSource) ?: return@forEach
+
+        fun pack(path: String?): String? {
+            val source = path?.let(::safeAudioSource) ?: return null
             val canonicalPath = source.canonicalPath
-            val relativePath = relativeByCanonicalSource[canonicalPath] ?: run {
+            return relativeByCanonicalSource[canonicalPath] ?: run {
                 val digest = source.sha256()
                 packedByDigest[digest]?.relativePath ?: run {
                     val extension = safeExtension(source.extension)
@@ -162,9 +170,13 @@ class BackupManager @Inject constructor(
                     }
                 }.also { relativeByCanonicalSource[canonicalPath] = it }
             }
-            relativeByNaatId[naat.id] = relativePath
         }
-        return ExportAudioIndex(relativeByNaatId, packedByDigest.values)
+
+        naats.forEach { naat ->
+            pack(naat.audioPath)?.let { primary[naat.id] = it }
+            pack(naat.secondaryAudioPath)?.let { secondary[naat.id] = it }
+        }
+        return ExportAudioIndex(primary, secondary, packedByDigest.values)
     }
 
     private fun safeAudioSource(path: String): File? {
@@ -255,45 +267,54 @@ class BackupManager @Inject constructor(
 
     private fun buildRestorePlan(staged: StagedArchive): RestorePlan {
         val plannedAudioByArchivePath = mutableMapOf<String, PlannedAudio>()
+
+        fun planAudio(rawPath: String?, entryNumber: Int): PlannedAudio? {
+            val archivePath = when (staged.formatVersion) {
+                FORMAT_VERSION -> rawPath?.also {
+                    if (V2_AUDIO_NAME.matchEntire(it) == null) {
+                        throw IOException("Invalid audio reference in entry $entryNumber")
+                    }
+                }
+                1 -> legacyArchivePath(rawPath)
+                else -> null
+            }
+            val source = archivePath?.let(staged.audioByArchivePath::get)
+            if (staged.formatVersion == FORMAT_VERSION && archivePath != null && source == null) {
+                throw IOException("Missing audio payload for entry $entryNumber")
+            }
+            return if (source == null || archivePath == null) null else {
+                plannedAudioByArchivePath.getOrPut(archivePath) {
+                    val digest = source.sha256()
+                    PlannedAudio(
+                        source,
+                        File(File(context.filesDir, "audio"), "$digest.${safeExtension(source.extension)}"),
+                        digest
+                    )
+                }
+            }
+        }
+
         val entries = buildList {
             for (index in 0 until staged.entries.length()) {
                 val obj = staged.entries.getJSONObject(index)
                 val title = obj.getString("title")
                 if (title.isBlank()) throw IOException("Backup entry ${index + 1} has a blank title")
-                val rawAudioPath = obj.nullableString("audioPath")
-                val archivePath = when (staged.formatVersion) {
-                    FORMAT_VERSION -> rawAudioPath?.also {
-                        if (V2_AUDIO_NAME.matchEntire(it) == null) {
-                            throw IOException("Invalid audio reference in entry ${index + 1}")
-                        }
-                    }
-                    1 -> legacyArchivePath(rawAudioPath)
-                    else -> null
-                }
-                val source = archivePath?.let(staged.audioByArchivePath::get)
-                if (staged.formatVersion == FORMAT_VERSION && archivePath != null && source == null) {
-                    throw IOException("Missing audio payload for entry ${index + 1}")
-                }
-                val plannedAudio = if (source != null) {
-                    plannedAudioByArchivePath.getOrPut(archivePath) {
-                        val digest = source.sha256()
-                        val destination = File(
-                            File(context.filesDir, "audio"),
-                            "$digest.${safeExtension(source.extension)}"
-                        )
-                        PlannedAudio(source, destination, digest)
-                    }
+                val primary = planAudio(obj.nullableString("audioPath"), index + 1)
+                val secondary = if (staged.formatVersion == FORMAT_VERSION) {
+                    planAudio(obj.nullableString("secondaryAudioPath"), index + 1)
                 } else null
-                val requestedType = obj.optString("audioType", "none")
                 add(NaatEntity(
                     title = title,
                     poet = obj.nullableString("poet"),
                     category = NaatCategories.normalize(obj.nullableString("category")),
                     lyrics = obj.nullableString("lyrics"),
-                    audioType = if (plannedAudio == null) "none" else requestedType,
-                    audioPath = plannedAudio?.destination?.absolutePath,
+                    audioType = if (primary == null) "none" else obj.optString("audioType", "none"),
+                    audioPath = primary?.destination?.absolutePath,
                     isFavorite = obj.optBoolean("isFavorite", false),
-                    createdAt = obj.optLong("createdAt", System.currentTimeMillis())
+                    createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                    secondaryAudioType = if (secondary == null) "none"
+                        else obj.optString("secondaryAudioType", "none"),
+                    secondaryAudioPath = secondary?.destination?.absolutePath
                 ))
             }
         }

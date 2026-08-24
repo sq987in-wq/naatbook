@@ -34,6 +34,6 @@ interface NaatDao {
     @Query("DELETE FROM naats WHERE id = :id")
     suspend fun deleteNaatById(id: Int)
 
-    @Query("SELECT COUNT(*) FROM naats WHERE audioPath = :audioPath")
+    @Query("SELECT COUNT(*) FROM naats WHERE audioPath = :audioPath OR secondaryAudioPath = :audioPath")
     suspend fun countByAudioPath(audioPath: String): Int
 }

@@ -13,5 +13,7 @@ data class NaatEntity(
     val audioType: String, // "recorded", "local_file", or "none"
     val audioPath: String?,
     val isFavorite: Boolean,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val secondaryAudioType: String = "none",
+    val secondaryAudioPath: String? = null
 )

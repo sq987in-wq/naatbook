@@ -5,7 +5,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [NaatEntity::class], version = 2, exportSchema = true)
+@Database(entities = [NaatEntity::class], version = 3, exportSchema = true)
 abstract class NaatDatabase : RoomDatabase() {
 
     abstract fun naatDao(): NaatDao
@@ -29,6 +29,16 @@ abstract class NaatDatabase : RoomDatabase() {
                     "UPDATE naats SET category = 'Others' WHERE category NOT IN " +
                         "('Naat', 'Hamd', 'Manqabat', 'Salam', 'Qasida', 'Nasheed', 'My Kalam', 'Others')"
                 )
+            }
+        }
+
+        /** v2 -> v3: preserve an independent second audio attachment per entry. */
+        internal val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE naats ADD COLUMN secondaryAudioType TEXT NOT NULL DEFAULT 'none'"
+                )
+                db.execSQL("ALTER TABLE naats ADD COLUMN secondaryAudioPath TEXT")
             }
         }
     }

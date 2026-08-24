@@ -11,11 +11,7 @@ import androidx.media3.session.MediaSessionService
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
-/**
- * Media3 service owning the system MediaSession and automatic media notification.
- * ExoPlayer handles audio focus and becoming-noisy events; MediaSessionService supplies
- * lock-screen, Bluetooth/headset, notification, and external controller integration.
- */
+/** Media3 session/notification owner for service-owned entry playback. */
 @AndroidEntryPoint
 class MediaPlaybackService : MediaSessionService() {
     @Inject lateinit var engine: Media3PlaybackEngine
@@ -29,11 +25,40 @@ class MediaPlaybackService : MediaSessionService() {
             .build()
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val result = super.onStartCommand(intent, flags, startId)
+        if (intent?.action == ACTION_PLAY_ENTRY) {
+            val path = intent.getStringExtra(EXTRA_PATH)
+            val mediaId = intent.getStringExtra(EXTRA_MEDIA_ID)
+            val title = intent.getStringExtra(EXTRA_TITLE)
+            if (path != null && mediaId != null && title != null) {
+                try {
+                    // onCreate has already attached MediaSession listeners, so this state change
+                    // always raises the foreground notification and lock-screen controls.
+                    engine.play(
+                        audioPath = path,
+                        mediaId = mediaId,
+                        title = title,
+                        artist = intent.getStringExtra(EXTRA_ARTIST),
+                        notifyPreviousOwner = false
+                    )
+                } catch (error: Exception) {
+                    Log.e(TAG, "Unable to start service-owned playback", error)
+                    engine.stop()
+                    stopSelfResult(startId)
+                }
+            } else {
+                Log.e(TAG, "Rejected incomplete playback request")
+                stopSelfResult(startId)
+            }
+        }
+        return result
+    }
+
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Keep genuinely active listening alive after the Activity/task disappears. Retire an
-        // idle service so a paused/cleared player cannot leave process work behind indefinitely.
+        // Active or paused entry sessions remain available through the media notification.
         val player = mediaSession?.player
         if (player == null || player.mediaItemCount == 0 || player.playbackState == Player.STATE_ENDED) {
             stopSelf()
@@ -60,16 +85,31 @@ class MediaPlaybackService : MediaSessionService() {
 
     companion object {
         private const val TAG = "Media3Service"
+        private const val ACTION_PLAY_ENTRY = "com.example.audio.PLAY_ENTRY"
+        private const val EXTRA_PATH = "path"
+        private const val EXTRA_MEDIA_ID = "mediaId"
+        private const val EXTRA_TITLE = "title"
+        private const val EXTRA_ARTIST = "artist"
 
-        fun start(context: Context) {
+        fun playEntry(
+            context: Context,
+            path: String,
+            naatId: Int,
+            title: String,
+            artist: String?
+        ) {
+            val intent = Intent(context, MediaPlaybackService::class.java).apply {
+                action = ACTION_PLAY_ENTRY
+                putExtra(EXTRA_PATH, path)
+                putExtra(EXTRA_MEDIA_ID, "naat:$naatId")
+                putExtra(EXTRA_TITLE, title)
+                putExtra(EXTRA_ARTIST, artist)
+            }
             try {
-                ContextCompat.startForegroundService(
-                    context,
-                    Intent(context, MediaPlaybackService::class.java)
-                )
+                ContextCompat.startForegroundService(context, intent)
             } catch (error: Exception) {
-                // In-app playback remains usable if an OEM rejects foreground startup.
-                Log.w(TAG, "MediaSessionService start was rejected", error)
+                Log.e(TAG, "MediaSessionService start was rejected", error)
+                throw error
             }
         }
 

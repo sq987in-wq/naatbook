@@ -23,7 +23,7 @@ object DatabaseModule {
             NaatDatabase::class.java,
             "naat_notebook_database"
         )
-            .addMigrations(NaatDatabase.MIGRATION_1_2)
+            .addMigrations(NaatDatabase.MIGRATION_1_2, NaatDatabase.MIGRATION_2_3)
             // Never silently erase a notebook. A missing future migration must fail.
             .build()
 

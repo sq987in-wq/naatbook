@@ -434,7 +434,7 @@ fun LibraryScreen(
             text = {
                 Text(
                     "\"${candidate.title}\" will be permanently deleted" +
-                        if (candidate.audioType != "none") " along with its attached audio." else "."
+                        if (candidate.audioType != "none" || candidate.secondaryAudioType != "none") " along with its attached audio." else "."
                 )
             },
             confirmButton = {
@@ -583,25 +583,15 @@ fun NaatRowItem(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                // Audio Attachment indicators
-                if (naat.audioType == "recorded") {
-                    Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Recorded Audio Note Available",
-                        tint = HighContrastGray,
-                        modifier = Modifier
-                            .padding(end = 4.dp)
-                            .size(20.dp)
-                    )
-                } else if (naat.audioType == "local_file") {
-                    Icon(
-                        imageVector = Icons.Default.MusicNote,
-                        contentDescription = "Linked MP3 Available",
-                        tint = HighContrastGray,
-                        modifier = Modifier
-                            .padding(end = 4.dp)
-                            .size(20.dp)
-                    )
+                // Independent voice-note and linked-file indicators.
+                val audioTypes = setOf(naat.audioType, naat.secondaryAudioType)
+                if ("recorded" in audioTypes) {
+                    Icon(Icons.Default.Mic, contentDescription = "Recorded Audio Note Available",
+                        tint = HighContrastGray, modifier = Modifier.padding(end = 4.dp).size(20.dp))
+                }
+                if ("local_file" in audioTypes) {
+                    Icon(Icons.Default.MusicNote, contentDescription = "Linked MP3 Available",
+                        tint = HighContrastGray, modifier = Modifier.padding(end = 4.dp).size(20.dp))
                 }
 
                 // Edit entry

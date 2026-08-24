@@ -87,6 +87,30 @@ class BackupAtomicityTest {
     }
 
     @Test
+    fun `version two preserves independent voice and linked attachments`() = runBlocking {
+        val voice = "voice".toByteArray()
+        val linked = "linked".toByteArray()
+        fun digest(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
+        val voicePath = "audio/${digest(voice)}.m4a"
+        val linkedPath = "audio/${digest(linked)}.mp3"
+        val dual = entry("Dual")
+            .put("audioType", "recorded").put("audioPath", voicePath)
+            .put("secondaryAudioType", "local_file").put("secondaryAudioPath", linkedPath)
+        val archive = archive(
+            JSONObject().put("formatVersion", 2).put("entries", JSONArray().put(dual)),
+            mapOf(voicePath to voice, linkedPath to linked)
+        )
+
+        assertEquals(1, manager.importBackup(Uri.fromFile(archive)).getOrThrow())
+        val restored = repository.allNaats.first().single()
+        assertEquals("recorded", restored.audioType)
+        assertEquals("local_file", restored.secondaryAudioType)
+        assertTrue(File(restored.audioPath!!).isFile)
+        assertTrue(File(restored.secondaryAudioPath!!).isFile)
+    }
+
+    @Test
     fun `version one absolute audio path restores through staged content address`() = runBlocking {
         val payload = "legacy audio".toByteArray()
         val legacyPath = "recordings/legacy.m4a"
