@@ -6,7 +6,7 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -140,11 +140,9 @@ fun NaatApp(viewModel: NaatViewModel) {
 
     MyApplicationTheme(darkTheme = darkThemeEnabled) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            BoxWithConstraints(Modifier.fillMaxSize()) {
-                // The sheet is intentionally bounded below the full window height so
-                // it remains a sheet on compact phones instead of becoming a status-bar
-                // touching fullscreen editor. Its LazyColumn owns the inner scrolling.
-                val sheetMaxHeight = maxHeight * 0.90f
+            Box(Modifier.fillMaxSize()) {
+                // The non-draggable editor sheet owns the full available height below
+                // the status bar, while its LazyColumn remains the only inner scroller.
                 val atHome = currentRoute == null || currentRoute == NaatRoutes.HOME
 
                 Scaffold(
@@ -219,7 +217,6 @@ fun NaatApp(viewModel: NaatViewModel) {
                 if (showAddModal) {
                     NonDismissibleEditorSheet(
                         viewModel = viewModel,
-                        maxHeight = sheetMaxHeight,
                         discardConfirmationVisible = showDiscardConfirmation,
                         onRequestClose = ::requestEditorClose
                     )
