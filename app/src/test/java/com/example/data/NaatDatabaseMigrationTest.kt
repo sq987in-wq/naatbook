@@ -13,7 +13,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [28])
 class NaatDatabaseMigrationTest {
 
     private lateinit var context: Context
@@ -32,11 +32,15 @@ class NaatDatabaseMigrationTest {
     }
 
     @Test
-    fun `migration 1 to 2 preserves rows and normalizes categories`() {
+    fun `migration 1 through 4 preserves rows normalizes categories and timestamps edits`() {
         createVersionOneDatabase()
 
         database = Room.databaseBuilder(context, NaatDatabase::class.java, TEST_DATABASE)
-            .addMigrations(NaatDatabase.MIGRATION_1_2)
+            .addMigrations(
+                NaatDatabase.MIGRATION_1_2,
+                NaatDatabase.MIGRATION_2_3,
+                NaatDatabase.MIGRATION_3_4
+            )
             .allowMainThreadQueries()
             .build()
 
@@ -48,6 +52,13 @@ class NaatDatabaseMigrationTest {
                     migrated[cursor.getString(0)] = cursor.getString(1)
                 }
             }
+
+        assertEquals(0, database!!.openHelper.writableDatabase
+            .query("SELECT COUNT(*) FROM naats WHERE secondaryAudioType != 'none' OR secondaryAudioPath IS NOT NULL")
+            .use { cursor -> cursor.moveToFirst(); cursor.getInt(0) })
+        assertEquals(0, database!!.openHelper.writableDatabase
+            .query("SELECT COUNT(*) FROM naats WHERE updatedAt != createdAt")
+            .use { cursor -> cursor.moveToFirst(); cursor.getInt(0) })
 
         assertEquals(
             linkedMapOf(

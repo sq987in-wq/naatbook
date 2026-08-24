@@ -7,6 +7,15 @@ import javax.inject.Singleton
 @Singleton
 class NaatRepository @Inject constructor(private val naatDao: NaatDao) {
     val allNaats: Flow<List<NaatEntity>> = naatDao.getAllNaats()
+    val allSummaries: Flow<List<NaatSummary>> = naatDao.getAllSummaries()
+    val recentSummaries: Flow<List<NaatSummary>> = naatDao.getRecentSummaries()
+    val categoryCounts: Flow<List<CategoryCount>> = naatDao.getCategoryCounts()
+
+    fun filteredSummaries(
+        query: String,
+        folder: String?,
+        favoritesOnly: Boolean
+    ): Flow<List<NaatSummary>> = naatDao.getFilteredSummaries(query, folder, favoritesOnly)
 
     fun getNaatByIdFlow(id: Int): Flow<NaatEntity?> = naatDao.getNaatByIdFlow(id)
 
@@ -14,7 +23,14 @@ class NaatRepository @Inject constructor(private val naatDao: NaatDao) {
 
     suspend fun insert(naat: NaatEntity): Long = naatDao.insertNaat(naat)
 
+    suspend fun insertAll(naats: List<NaatEntity>): List<Long> = naatDao.insertNaats(naats)
+
     suspend fun update(naat: NaatEntity) = naatDao.updateNaat(naat)
+
+    suspend fun toggleFavorite(id: Int): NaatEntity? {
+        naatDao.toggleFavorite(id)
+        return naatDao.getNaatById(id)
+    }
 
     suspend fun delete(naat: NaatEntity) = naatDao.deleteNaat(naat)
 

@@ -1,21 +1,12 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
+# P4f release shrinking policy
 #
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Android Gradle Plugin retains manifest-declared components. Hilt, Room, and
+# Media3 publish their own consumer rules, and this app deliberately has no
+# reflection-driven model serialization or Class.forName entry points. Keep the
+# rule set narrow: broad -keep class ** or -dontwarn rules would hide genuine
+# shrinker regressions and materially reduce the benefit of R8.
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
-
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
-
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Preserve useful line information for a privately retained R8 mapping file so
+# production crash traces can be retraced without keeping original source names.
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

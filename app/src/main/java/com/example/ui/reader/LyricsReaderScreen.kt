@@ -1,68 +1,95 @@
 package com.example.ui.reader
 
 import android.app.Activity
-import android.content.Intent
-import android.net.Uri
-import android.speech.RecognizerIntent
 import android.view.WindowManager
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
-import androidx.compose.ui.res.painterResource
-import com.example.R
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.audio.RecordingState
-import com.example.data.NaatCategories
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.NaatEntity
-import com.example.ui.theme.MyApplicationTheme
-import com.example.ui.theme.NastaliqFamily
-import com.example.ui.theme.HighContrastRed
-import com.example.ui.theme.HighContrastGray
-import com.example.viewmodel.NaatViewModel
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import java.io.File
-
 import com.example.ui.components.formatTime
 import com.example.ui.components.usesArabicScript
+import com.example.ui.theme.HighContrastGray
+import com.example.ui.theme.HighContrastRed
+import com.example.ui.theme.NastaliqFamily
+import com.example.viewmodel.NaatViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+
+private val ReaderBottomBreathingRoom = 24.dp
 
 @Composable
 fun LyricsReaderScreen(
@@ -72,6 +99,7 @@ fun LyricsReaderScreen(
     onEdit: (NaatEntity) -> Unit
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     val scrollState = rememberScrollState()
 
     // Keep the screen on while reciting — the reader must never dim mid-performance.
@@ -83,330 +111,605 @@ fun LyricsReaderScreen(
         }
     }
 
-    // Auto-Scroll engine configurations
+    // The full-screen state is intentionally local to this reader entry. It survives
+    // a rotation but never leaks into a different entry.
+    var immersive by rememberSaveable(naat.id) { mutableStateOf(false) }
+    var immersiveChromeVisible by rememberSaveable(naat.id) { mutableStateOf(false) }
+    var showImmersiveHint by rememberSaveable(naat.id) { mutableStateOf(false) }
+    var topChromeHeightPx by remember { mutableIntStateOf(0) }
+    var hasMeasuredTopChrome by remember { mutableStateOf(false) }
+    var bottomChromeHeightPx by remember { mutableIntStateOf(0) }
+
+    // Auto-scroll engine configuration.
     var autoScrollActive by remember { mutableStateOf(false) }
-    var scrollSpeed by remember { mutableFloatStateOf(1f) } // Speed multiplier mapping
+    var scrollSpeed by remember { mutableFloatStateOf(1f) }
 
-    // Sizing controls
-    val defaultFontSize by viewModel.globalFontSize.collectAsState()
+    // Sizing controls.
+    val defaultFontSize by viewModel.globalFontSize.collectAsStateWithLifecycle()
     var localFontSize by remember { mutableStateOf(defaultFontSize) }
+    LaunchedEffect(defaultFontSize) { localFontSize = defaultFontSize }
 
-    // Player controls are scoped to this entry; a modal preview or another
-    // entry can never drive this reader's transport UI.
-    val playbackController = viewModel.playbackController
-    val nowPlaying by playbackController.nowPlaying.collectAsState()
-    val hasActiveSession by playbackController.hasActiveSession.collectAsState()
-    val playerIsPlaying by playbackController.isPlaying.collectAsState()
-    val playerPosition by playbackController.currentPosition.collectAsState()
-    val playerDuration by playbackController.duration.collectAsState()
-    val ownsEntry = nowPlaying?.naatId == naat.id && hasActiveSession
-    val isPlaying = ownsEntry && playerIsPlaying
-    val currentPos = if (ownsEntry) playerPosition else 0
-    val audioDuration = if (ownsEntry) playerDuration else 0
+    val readerChromeVisible = !immersive || immersiveChromeVisible
 
-    // Sync local font size if global changes
-    LaunchedEffect(defaultFontSize) {
-        localFontSize = defaultFontSize
+    /*
+     * The lyric viewport always fills the entire reader window. Chrome is rendered
+     * as an overlay and only changes scroll-content padding, never the viewport's
+     * origin or height. Before any top chrome change we move ScrollState by the
+     * exact padding delta. Consequently the currently read line stays in the same
+     * screen position instead of jumping when controls appear/disappear.
+     */
+    fun compensateForTopChromeChange(fromPx: Int, toPx: Int) {
+        scrollState.dispatchRawDelta(
+            ReaderImmersivePolicy.scrollCompensationPx(fromPx, toPx)
+        )
     }
 
-    // Auto-scroll loop engine coroutine. The step is dp-based, so the pace is
-    // consistent across screen densities; it stops on its own at the bottom.
-    val density = LocalDensity.current
+    fun enterImmersive() {
+        if (immersive) return
+        compensateForTopChromeChange(topChromeHeightPx, 0)
+        immersive = true
+        immersiveChromeVisible = false
+        showImmersiveHint = true
+    }
+
+    fun exitImmersive() {
+        if (!immersive) return
+        val fromTop = if (immersiveChromeVisible) topChromeHeightPx else 0
+        compensateForTopChromeChange(fromTop, topChromeHeightPx)
+        immersive = false
+        immersiveChromeVisible = false
+        showImmersiveHint = false
+    }
+
+    fun toggleImmersiveChrome() {
+        if (!immersive) return
+        val fromTop = if (immersiveChromeVisible) topChromeHeightPx else 0
+        val toTop = if (immersiveChromeVisible) 0 else topChromeHeightPx
+        compensateForTopChromeChange(fromTop, toTop)
+        immersiveChromeVisible = !immersiveChromeVisible
+        showImmersiveHint = !immersiveChromeVisible
+    }
+
+    fun updateTopChromeHeight(heightPx: Int) {
+        if (heightPx == topChromeHeightPx) return
+        val oldHeight = topChromeHeightPx
+        topChromeHeightPx = heightPx
+        // On initial Reader composition there is no previously visible lyric line
+        // to anchor: leave ScrollState at zero so the first verse begins below the
+        // freshly measured chrome. Subsequent changes preserve the active line.
+        if (readerChromeVisible && hasMeasuredTopChrome) {
+            compensateForTopChromeChange(oldHeight, heightPx)
+        }
+        hasMeasuredTopChrome = true
+    }
+
+    // A full-screen back press returns to normal Reader first; it never closes
+    // the entry or stops the service-owned audio session by accident.
+    BackHandler(enabled = immersive) { exitImmersive() }
+    ApplyImmersiveSystemBars(enabled = immersive)
+
+    // Auto-scroll loop. It continues across chrome visibility changes because the
+    // same ScrollState instance owns the lyric viewport throughout.
     LaunchedEffect(autoScrollActive, scrollSpeed) {
         if (autoScrollActive) {
             while (isActive) {
                 val stepPx = with(density) { (1.5f * scrollSpeed).dp.toPx() }
                 scrollState.scrollBy(stepPx)
                 delay(30)
-                if (scrollState.value >= scrollState.maxValue) {
-                    autoScrollActive = false
-                }
+                if (scrollState.value >= scrollState.maxValue) autoScrollActive = false
             }
         }
     }
 
-    Scaffold(
-        topBar = {
-            Row(
+    LaunchedEffect(showImmersiveHint) {
+        if (showImmersiveHint) {
+            delay(2_200)
+            showImmersiveHint = false
+        }
+    }
+
+    val topContentPaddingPx = if (readerChromeVisible) topChromeHeightPx else 0
+    val bottomContentPaddingPx = if (readerChromeVisible) bottomChromeHeightPx else 0
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .testTag("reader_root")
+    ) {
+        ReaderLyricsViewport(
+            naat = naat,
+            scrollState = scrollState,
+            fontSize = localFontSize,
+            topChromePaddingPx = topContentPaddingPx,
+            bottomChromePaddingPx = bottomContentPaddingPx,
+            immersive = immersive,
+            onIntentionalTap = ::toggleImmersiveChrome
+        )
+
+        if (readerChromeVisible) {
+            Column(
                 modifier = Modifier
+                    .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.background)
-                    .statusBarsPadding()
-                    .padding(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .onSizeChanged { updateTopChromeHeight(it.height) }
+                    .testTag("reader_chrome_top")
             ) {
-                IconButton(
-                    // Closing the reader keeps playback running (MediaSession owns
-                    // the session); the global mini-player takes over control.
-                    onClick = onClose,
-                    modifier = Modifier.testTag("close_reader")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Close Reader",
-                        tint = MaterialTheme.colorScheme.onBackground
-                    )
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = naat.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = if (!naat.poet.isNullOrBlank()) "Poet: ${naat.poet}" else "Unknown Poet",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = HighContrastGray,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                IconButton(
-                    onClick = { viewModel.toggleFavorite(naat) },
-                    modifier = Modifier.testTag("reader_favorite_toggle")
-                ) {
-                    Icon(
-                        imageVector = if (naat.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        contentDescription = "Toggle favorite",
-                        tint = if (naat.isFavorite) HighContrastRed else MaterialTheme.colorScheme.onBackground
-                    )
-                }
-
-                // Edit this entry right from the reader
-                IconButton(
-                    onClick = { onEdit(naat) },
-                    modifier = Modifier.testTag("reader_edit_btn")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Edit,
-                        contentDescription = "Edit entry",
-                        tint = MaterialTheme.colorScheme.onBackground
-                    )
-                }
+                ReaderTopBar(
+                    naat = naat,
+                    immersive = immersive,
+                    onClose = onClose,
+                    onToggleFavorite = { viewModel.toggleFavorite(naat) },
+                    onEdit = { onEdit(naat) },
+                    onEnterImmersive = ::enterImmersive,
+                    onExitImmersive = ::exitImmersive
+                )
+                ReaderControls(
+                    fontSize = localFontSize,
+                    onFontSizeChange = { localFontSize = it },
+                    autoScrollActive = autoScrollActive,
+                    onAutoScrollToggle = { autoScrollActive = !autoScrollActive },
+                    scrollSpeed = scrollSpeed,
+                    onScrollSpeedChange = { scrollSpeed = it }
+                )
             }
-        },
-        bottomBar = {
-            // Media Control Widget: Sticky mini-player widget fixed at the bottom
-            if (naat.audioType != "none" && !naat.audioPath.isNullOrEmpty()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.background)
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-                    Spacer(modifier = Modifier.height(8.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = if (naat.audioType == "recorded") Icons.Default.Mic else Icons.Default.MusicNote,
-                            contentDescription = null,
-                            tint = HighContrastGray,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = if (naat.audioType == "recorded") "playing Voice Note" else "playing Linked Audio",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = HighContrastGray
-                        )
+            ReaderAudioControls(
+                naat = naat,
+                viewModel = viewModel,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .onSizeChanged { bottomChromeHeightPx = it.height }
+                    .testTag("reader_chrome_bottom")
+            )
+        }
+
+        AnimatedVisibility(
+            visible = immersive && !immersiveChromeVisible && showImmersiveHint,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 24.dp)
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.88f),
+                contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                shape = MaterialTheme.shapes.large,
+                shadowElevation = 4.dp,
+                modifier = Modifier.testTag("immersive_reader_hint")
+            ) {
+                Text(
+                    text = "Tap once to show controls",
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReaderTopBar(
+    naat: NaatEntity,
+    immersive: Boolean,
+    onClose: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onEdit: () -> Unit,
+    onEnterImmersive: () -> Unit,
+    onExitImmersive: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onClose, modifier = Modifier.testTag("close_reader")) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = "Close Reader",
+                tint = MaterialTheme.colorScheme.onBackground
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = naat.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1
+            )
+            Text(
+                text = if (!naat.poet.isNullOrBlank()) "Poet: ${naat.poet}" else "Unknown Poet",
+                style = MaterialTheme.typography.bodySmall,
+                color = HighContrastGray,
+                maxLines = 1
+            )
+        }
+
+        if (!immersive) {
+            IconButton(
+                onClick = onToggleFavorite,
+                modifier = Modifier.testTag("reader_favorite_toggle")
+            ) {
+                Icon(
+                    imageVector = if (naat.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                    contentDescription = "Toggle favorite",
+                    tint = if (naat.isFavorite) HighContrastRed else MaterialTheme.colorScheme.onBackground
+                )
+            }
+            IconButton(onClick = onEdit, modifier = Modifier.testTag("reader_edit_btn")) {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "Edit entry",
+                    tint = MaterialTheme.colorScheme.onBackground
+                )
+            }
+        }
+
+        IconButton(
+            onClick = if (immersive) onExitImmersive else onEnterImmersive,
+            modifier = Modifier.testTag(
+                if (immersive) "reader_exit_fullscreen" else "reader_enter_fullscreen"
+            )
+        ) {
+            Icon(
+                imageVector = if (immersive) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                contentDescription = if (immersive) "Exit full screen reader" else "Enter full screen reader",
+                tint = MaterialTheme.colorScheme.onBackground
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReaderControls(
+    fontSize: Float,
+    onFontSizeChange: (Float) -> Unit,
+    autoScrollActive: Boolean,
+    onAutoScrollToggle: () -> Unit,
+    scrollSpeed: Float,
+    onScrollSpeedChange: (Float) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f), MaterialTheme.shapes.medium)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .testTag("reader_controls"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1.2f)
+        ) {
+            Icon(
+                Icons.Default.Settings,
+                contentDescription = "Font size",
+                modifier = Modifier.size(16.dp),
+                tint = HighContrastGray
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Font:", style = MaterialTheme.typography.bodySmall, color = HighContrastGray)
+            Slider(
+                value = fontSize,
+                onValueChange = onFontSizeChange,
+                valueRange = 12f..36f,
+                steps = 23,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.End
+        ) {
+            Button(
+                onClick = onAutoScrollToggle,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (autoScrollActive) {
+                        MaterialTheme.colorScheme.onBackground
+                    } else {
+                        HighContrastGray
                     }
+                ),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier
+                    .height(32.dp)
+                    .testTag("auto_scroll_toggle")
+            ) {
+                Text(
+                    text = if (autoScrollActive) "Scrolling" else "AutoScroll",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(
-                            onClick = {
-                                if (isPlaying) {
-                                    playbackController.pause()
-                                } else if (ownsEntry) {
-                                    playbackController.resume()
-                                } else {
-                                    viewModel.startEntryPlayback(naat)
-                                }
-                            },
-                            modifier = Modifier.testTag("reader_play_pause")
+            if (autoScrollActive) {
+                Spacer(modifier = Modifier.width(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    listOf(1f, 1.5f, 2f).forEach { speed ->
+                        TextButton(
+                            onClick = { onScrollSpeedChange(speed) },
+                            contentPadding = PaddingValues(horizontal = 2.dp),
+                            modifier = Modifier.height(32.dp)
                         ) {
-                            Icon(
-                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (isPlaying) "Pause" else "Play",
-                                tint = MaterialTheme.colorScheme.onBackground,
-                                modifier = Modifier.size(32.dp)
+                            Text(
+                                text = (if (speed % 1f == 0f) speed.toInt().toString() else speed.toString()) + "x",
+                                fontSize = 11.sp,
+                                fontWeight = if (scrollSpeed == speed) FontWeight.Bold else FontWeight.Normal,
+                                color = if (scrollSpeed == speed) {
+                                    MaterialTheme.colorScheme.onBackground
+                                } else {
+                                    HighContrastGray
+                                }
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+}
 
-                        // Progress bar seeking
-                        Slider(
-                            value = currentPos.toFloat(),
-                            onValueChange = { playbackController.seekTo(it.toInt()) },
-                            valueRange = 0f..(if (audioDuration > 0) audioDuration.toFloat() else 1000f),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("reader_audio_seekbar")
+@Composable
+private fun ReaderLyricsViewport(
+    naat: NaatEntity,
+    scrollState: androidx.compose.foundation.ScrollState,
+    fontSize: Float,
+    topChromePaddingPx: Int,
+    bottomChromePaddingPx: Int,
+    immersive: Boolean,
+    onIntentionalTap: () -> Unit
+) {
+    val density = LocalDensity.current
+    val topPadding = with(density) { topChromePaddingPx.toDp() }
+    val bottomPadding = with(density) { bottomChromePaddingPx.toDp() } + ReaderBottomBreathingRoom
+    val horizontalPadding = if (immersive) 24.dp else 20.dp
+    val tapLabel = if (immersive) "Show or hide reader controls" else ""
+    val tapModifier = Modifier.toggleReaderChromeOnIntentionalTap(
+        enabled = immersive,
+        onTap = onIntentionalTap
+    )
+
+    if (naat.lyrics.isNullOrBlank()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(tapModifier)
+                .semantics {
+                    if (immersive) {
+                        onClick(label = tapLabel) {
+                            onIntentionalTap()
+                            true
+                        }
+                    }
+                }
+                .padding(
+                    start = horizontalPadding,
+                    top = topPadding,
+                    end = horizontalPadding,
+                    bottom = bottomPadding
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "No written lyrics provided.\nReady to recite with attached media!",
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.bodyMedium,
+                color = HighContrastGray
+            )
+        }
+        return
+    }
+
+    val urduLyrics = usesArabicScript(naat.lyrics)
+    CompositionLocalProvider(
+        LocalLayoutDirection provides if (urduLyrics) LayoutDirection.Rtl else LayoutDirection.Ltr
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .then(tapModifier)
+                .semantics {
+                    if (immersive) {
+                        onClick(label = tapLabel) {
+                            onIntentionalTap()
+                            true
+                        }
+                    }
+                }
+                .padding(
+                    start = horizontalPadding,
+                    top = topPadding,
+                    end = horizontalPadding,
+                    bottom = bottomPadding
+                )
+                .testTag("reader_lyrics_surface")
+        ) {
+            Text(
+                text = naat.lyrics,
+                fontSize = fontSize.sp,
+                fontFamily = if (urduLyrics) NastaliqFamily else FontFamily.Serif,
+                lineHeight = (fontSize * if (urduLyrics) 2.0f else 1.6f).sp,
+                color = MaterialTheme.colorScheme.onBackground,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("reader_lyrics_text")
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReaderAudioControls(
+    naat: NaatEntity,
+    viewModel: NaatViewModel,
+    modifier: Modifier = Modifier
+) {
+    val controller = viewModel.playbackController
+    val nowPlaying by controller.nowPlaying.collectAsStateWithLifecycle()
+    val hasSession by controller.hasActiveSession.collectAsStateWithLifecycle()
+    val playerIsPlaying by controller.isPlaying.collectAsStateWithLifecycle()
+    val playerPosition by controller.currentPosition.collectAsStateWithLifecycle()
+    val playerDuration by controller.duration.collectAsStateWithLifecycle()
+    val attachments = remember(naat.id, naat.audioPath, naat.secondaryAudioPath) {
+        listOfNotNull(
+            naat.audioPath?.let { naat.audioType to it },
+            naat.secondaryAudioPath?.let { naat.secondaryAudioType to it }
+        ).filter { it.first != "none" }
+    }
+    if (attachments.isEmpty()) return
+
+    var selectedPath by remember(naat.id) { mutableStateOf(attachments.first().second) }
+    LaunchedEffect(attachments, nowPlaying?.audioPath) {
+        if (nowPlaying?.naatId == naat.id) selectedPath = nowPlaying?.audioPath ?: selectedPath
+        else if (attachments.none { it.second == selectedPath }) selectedPath = attachments.first().second
+    }
+    val ownsSelected = nowPlaying?.naatId == naat.id && nowPlaying?.audioPath == selectedPath && hasSession
+    val playing = ownsSelected && playerIsPlaying
+    val position = if (ownsSelected) playerPosition else 0
+    val duration = if (ownsSelected) playerDuration else 0
+    val selectedType = attachments.firstOrNull { it.second == selectedPath }?.first ?: attachments.first().first
+
+    Column(
+        modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+        if (attachments.size > 1) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                attachments.forEach { (type, path) ->
+                    TextButton(
+                        onClick = {
+                            selectedPath = path
+                            viewModel.startEntryPlayback(naat, path)
+                        },
+                        modifier = Modifier.testTag("reader_select_$type")
+                    ) {
+                        Icon(
+                            if (type == "recorded") Icons.Default.Mic else Icons.Default.MusicNote,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
                         )
-
-                        // Duration text indicator
-                        val posStr = formatTime(currentPos)
-                        val durStr = formatTime(audioDuration)
+                        Spacer(Modifier.width(4.dp))
                         Text(
-                            text = "$posStr / $durStr",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = HighContrastGray
+                            if (type == "recorded") "Voice Note" else "Linked Audio",
+                            fontWeight = if (selectedPath == path) FontWeight.Bold else FontWeight.Normal
                         )
                     }
                 }
             }
         }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .background(MaterialTheme.colorScheme.background)
-                .padding(horizontal = 16.dp)
-        ) {
-            // Instant Typography Slider & Auto Scroll Widgets
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+        Text(
+            if (selectedType == "recorded") "Voice Note" else "Linked Audio",
+            modifier = Modifier.align(Alignment.CenterHorizontally),
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            color = HighContrastGray
+        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(
+                onClick = {
+                    if (playing) controller.pause()
+                    else if (ownsSelected) controller.resume()
+                    else viewModel.startEntryPlayback(naat, selectedPath)
+                },
+                modifier = Modifier.testTag("reader_play_pause")
             ) {
-                // Sizing controller
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1.2f)
-                ) {
-                    Icon(Icons.Default.Settings, contentDescription = "Font size icon", modifier = Modifier.size(16.dp), tint = HighContrastGray)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Font:", style = MaterialTheme.typography.bodySmall, color = HighContrastGray)
-                    Slider(
-                        value = localFontSize,
-                        onValueChange = { localFontSize = it },
-                        valueRange = 12f..36f,
-                        steps = 23, // 24 steps total = 12..36 sp in exact 1-sp increments
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                // Auto Scroll Control
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    Button(
-                        onClick = { autoScrollActive = !autoScrollActive },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (autoScrollActive) MaterialTheme.colorScheme.onBackground else HighContrastGray
-                        ),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                        modifier = Modifier
-                            .height(32.dp)
-                            .testTag("auto_scroll_toggle")
-                    ) {
-                        Text(
-                            text = if (autoScrollActive) "Scrolling" else "AutoScroll",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    if (autoScrollActive) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        // Clickable speed slider to change pace (1x, 1.25x, 1.5x, etc.)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            listOf(1f, 1.5f, 2f).forEach { speed ->
-                                Text(
-                                    text = (if (speed % 1f == 0f) speed.toInt().toString() else speed.toString()) + "x",
-                                    fontSize = 11.sp,
-                                    fontWeight = if (scrollSpeed == speed) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (scrollSpeed == speed) MaterialTheme.colorScheme.onBackground else HighContrastGray,
-                                    modifier = Modifier
-                                        .clickable { scrollSpeed = speed }
-                                        .padding(horizontal = 4.dp)
-                                )
-                            }
-                        }
-                    }
-                }
+                Icon(
+                    if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (playing) "Pause" else "Play",
+                    modifier = Modifier.size(32.dp)
+                )
             }
+            Slider(
+                value = position.toFloat(),
+                onValueChange = { controller.seekTo(it.toInt()) },
+                valueRange = 0f..(if (duration > 0) duration.toFloat() else 1000f),
+                modifier = Modifier.weight(1f).testTag("reader_audio_seekbar")
+            )
+            Text(
+                "${formatTime(position)} / ${formatTime(duration)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = HighContrastGray
+            )
+        }
+    }
+}
 
-            Spacer(modifier = Modifier.height(12.dp))
+@Composable
+private fun ApplyImmersiveSystemBars(enabled: Boolean) {
+    val context = LocalContext.current
+    val view = LocalView.current
+    DisposableEffect(enabled, context, view) {
+        val controller = (context as? Activity)?.window?.let { window ->
+            WindowCompat.getInsetsController(window, view)
+        }
+        if (enabled) {
+            controller?.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller?.hide(WindowInsetsCompat.Type.systemBars())
+        }
+        onDispose {
+            if (enabled) controller?.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+}
 
-            // Main distraction free lyrics display screen
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                        RoundedCornerShape(8.dp)
-                    )
-                    .padding(8.dp)
-            ) {
-                if (naat.lyrics.isNullOrBlank()) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "No written lyrics provided.\nReady to recite with attached media!",
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = HighContrastGray
-                        )
-                    }
-                } else {
-                    // Urdu/Arabic-script lyrics get the Nastaliq family, an RTL
-                    // paragraph direction and more generous line air; Latin keeps
-                    // the classic Serif look. Centered couplets stay centered.
-                    val urduLyrics = usesArabicScript(naat.lyrics)
-                    CompositionLocalProvider(
-                        LocalLayoutDirection provides
-                                if (urduLyrics) LayoutDirection.Rtl else LayoutDirection.Ltr
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(scrollState)
-                                .padding(horizontal = 4.dp, vertical = 8.dp)
-                        ) {
-                            Text(
-                                text = naat.lyrics,
-                                fontSize = localFontSize.sp,
-                                fontFamily = if (urduLyrics) NastaliqFamily else FontFamily.Serif,
-                                lineHeight = (localFontSize * if (urduLyrics) 2.0f else 1.6f).sp,
-                                color = MaterialTheme.colorScheme.onBackground,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("reader_lyrics_text")
-                            )
-                            // Extra paddings at bottom so user can scroll items beyond view lines
-                            Spacer(modifier = Modifier.height(180.dp))
-                        }
+/**
+ * A non-consuming detector layered beside verticalScroll. It only invokes the
+ * toggle for a short, one-finger tap within touch slop; drags, swipes, long
+ * presses, and multi-touch gestures continue to belong to lyric scrolling.
+ */
+private fun Modifier.toggleReaderChromeOnIntentionalTap(
+    enabled: Boolean,
+    onTap: () -> Unit
+): Modifier = if (!enabled) {
+    this
+} else {
+    pointerInput(onTap) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val origin = down.position
+            val startedAt = down.uptimeMillis
+            var maxTravel = 0f
+            var maxPointers = 1
+            var released = false
+            var releasedAt = startedAt
+
+            do {
+                val event = awaitPointerEvent()
+                maxPointers = maxOf(maxPointers, event.changes.count { it.pressed })
+                event.changes.firstOrNull { it.id == down.id }?.let { change ->
+                    maxTravel = maxOf(maxTravel, (change.position - origin).getDistance())
+                    if (change.changedToUpIgnoreConsumed()) {
+                        released = true
+                        releasedAt = change.uptimeMillis
                     }
                 }
+            } while (event.changes.any { it.pressed })
+
+            if (released && ReaderImmersivePolicy.isIntentionalSingleTap(
+                    travelPx = maxTravel,
+                    touchSlopPx = viewConfiguration.touchSlop,
+                    pointerCount = maxPointers,
+                    durationMs = releasedAt - startedAt
+                )
+            ) {
+                onTap()
             }
         }
     }

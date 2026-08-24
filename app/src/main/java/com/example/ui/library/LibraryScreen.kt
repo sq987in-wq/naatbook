@@ -50,12 +50,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.audio.RecordingState
 import com.example.data.NaatCategories
-import com.example.data.NaatEntity
+import com.example.data.NaatSummary
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.NastaliqFamily
 import com.example.ui.theme.HighContrastRed
 import com.example.ui.theme.HighContrastGray
 import com.example.viewmodel.NaatViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -64,18 +65,20 @@ import java.io.File
 @Composable
 fun LibraryScreen(
     viewModel: NaatViewModel,
-    onOpenReader: (NaatEntity) -> Unit,
-    onEdit: (NaatEntity) -> Unit
+    onOpenReader: (Int) -> Unit,
+    onEdit: (Int) -> Unit
 ) {
     val context = LocalContext.current
-    val searchQuery by viewModel.searchQuery.collectAsState()
-    val selectedFolder by viewModel.selectedFolder.collectAsState()
-    val filteredNaats by viewModel.filteredNaats.collectAsState()
-    val allNaatsList by viewModel.allNaats.collectAsState()
-    val favoritesOnly by viewModel.showFavoritesOnly.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val selectedFolder by viewModel.selectedFolder.collectAsStateWithLifecycle()
+    val filteredNaats by viewModel.filteredSummaries.collectAsStateWithLifecycle()
+    val recentNaats by viewModel.recentSummaries.collectAsStateWithLifecycle()
+    val categoryCounts by viewModel.categoryCounts.collectAsStateWithLifecycle()
+    val favoritesOnly by viewModel.showFavoritesOnly.collectAsStateWithLifecycle()
+    val isDeleting by viewModel.isDeleting.collectAsStateWithLifecycle()
 
     // Entry pending deletion - deletions also remove attached audio, so confirm first
-    var deleteCandidate by remember { mutableStateOf<NaatEntity?>(null) }
+    var deleteCandidate by remember { mutableStateOf<NaatSummary?>(null) }
 
     // Speech-to-Text Voice input launcher
     val speechRecognizerLauncher = rememberLauncherForActivityResult(
@@ -250,7 +253,7 @@ fun LibraryScreen(
                             FolderSleekCard(
                                 folder = folder,
                                 iconPainter = folderIcons[folder] ?: folderStockPainter,
-                                count = allNaatsList.count { it.category.equals(folder, ignoreCase = true) },
+                                count = categoryCounts[folder] ?: 0,
                                 onClick = { viewModel.selectFolder(folder) },
                                 modifier = Modifier.weight(1f)
                             )
@@ -268,9 +271,8 @@ fun LibraryScreen(
                     }
                 }
 
-                // Recent entries list representing "Recent Notebooks" in the mockup HTML
-                val recentNaats = allNaatsList.take(3)
-
+                // Room already applies updatedAt DESC and strict LIMIT 10. The UI never
+                // materializes all summaries merely to render this bounded section.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -304,10 +306,10 @@ fun LibraryScreen(
                     recentNaats.forEach { naat ->
                         NaatRowItem(
                             naat = naat,
-                            onItemClick = { onOpenReader(naat) },
+                            onItemClick = { onOpenReader(naat.id) },
                             onDeleteClick = { deleteCandidate = naat },
-                            onFavoriteClick = { viewModel.toggleFavorite(naat) },
-                            onEditClick = { onEdit(naat) }
+                            onFavoriteClick = { viewModel.toggleFavorite(naat.id) },
+                            onEditClick = { onEdit(naat.id) }
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                     }
@@ -353,13 +355,13 @@ fun LibraryScreen(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(filteredNaats) { naat ->
+                        items(filteredNaats, key = { it.id }) { naat ->
                         NaatRowItem(
                             naat = naat,
-                            onItemClick = { onOpenReader(naat) },
+                            onItemClick = { onOpenReader(naat.id) },
                             onDeleteClick = { deleteCandidate = naat },
-                            onFavoriteClick = { viewModel.toggleFavorite(naat) },
-                            onEditClick = { onEdit(naat) }
+                            onFavoriteClick = { viewModel.toggleFavorite(naat.id) },
+                            onEditClick = { onEdit(naat.id) }
                         )
                         }
                     }
@@ -411,13 +413,13 @@ fun LibraryScreen(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(filteredNaats) { naat ->
+                    items(filteredNaats, key = { it.id }) { naat ->
                         NaatRowItem(
                             naat = naat,
-                            onItemClick = { onOpenReader(naat) },
+                            onItemClick = { onOpenReader(naat.id) },
                             onDeleteClick = { deleteCandidate = naat },
-                            onFavoriteClick = { viewModel.toggleFavorite(naat) },
-                            onEditClick = { onEdit(naat) }
+                            onFavoriteClick = { viewModel.toggleFavorite(naat.id) },
+                            onEditClick = { onEdit(naat.id) }
                         )
                     }
                 }
@@ -428,27 +430,33 @@ fun LibraryScreen(
     // Delete confirmation — deletions also remove attached audio files permanently.
     deleteCandidate?.let { candidate ->
         AlertDialog(
-            onDismissRequest = { deleteCandidate = null },
+            onDismissRequest = { if (!isDeleting) deleteCandidate = null },
             title = { Text("Delete this entry?") },
             text = {
                 Text(
                     "\"${candidate.title}\" will be permanently deleted" +
-                        if (candidate.audioType != "none") " along with its attached audio." else "."
+                        if (candidate.audioType != "none" || candidate.secondaryAudioType != "none") " along with its attached audio." else "."
                 )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.deleteNaat(candidate)
-                        deleteCandidate = null
+                        viewModel.deleteNaat(candidate.id) { deleteCandidate = null }
                     },
+                    enabled = !isDeleting,
                     modifier = Modifier.testTag("confirm_delete_btn")
                 ) {
-                    Text("Delete", color = HighContrastRed)
+                    if (isDeleting) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Deleting…")
+                    } else {
+                        Text("Delete", color = HighContrastRed)
+                    }
                 }
             },
             dismissButton = {
-                TextButton(onClick = { deleteCandidate = null }) {
+                TextButton(onClick = { deleteCandidate = null }, enabled = !isDeleting) {
                     Text("Cancel")
                 }
             }
@@ -528,7 +536,7 @@ fun FolderSleekCard(
 // --- Row Item representation inside a folder list ---
 @Composable
 fun NaatRowItem(
-    naat: NaatEntity,
+    naat: NaatSummary,
     onItemClick: () -> Unit,
     onDeleteClick: () -> Unit,
     onFavoriteClick: () -> Unit,
@@ -576,25 +584,15 @@ fun NaatRowItem(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                // Audio Attachment indicators
-                if (naat.audioType == "recorded") {
-                    Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Recorded Audio Note Available",
-                        tint = HighContrastGray,
-                        modifier = Modifier
-                            .padding(end = 4.dp)
-                            .size(20.dp)
-                    )
-                } else if (naat.audioType == "local_file") {
-                    Icon(
-                        imageVector = Icons.Default.MusicNote,
-                        contentDescription = "Linked MP3 Available",
-                        tint = HighContrastGray,
-                        modifier = Modifier
-                            .padding(end = 4.dp)
-                            .size(20.dp)
-                    )
+                // Independent voice-note and linked-file indicators.
+                val audioTypes = setOf(naat.audioType, naat.secondaryAudioType)
+                if ("recorded" in audioTypes) {
+                    Icon(Icons.Default.Mic, contentDescription = "Recorded Audio Note Available",
+                        tint = HighContrastGray, modifier = Modifier.padding(end = 4.dp).size(20.dp))
+                }
+                if ("local_file" in audioTypes) {
+                    Icon(Icons.Default.MusicNote, contentDescription = "Linked MP3 Available",
+                        tint = HighContrastGray, modifier = Modifier.padding(end = 4.dp).size(20.dp))
                 }
 
                 // Edit entry

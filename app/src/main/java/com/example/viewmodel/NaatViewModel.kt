@@ -3,6 +3,7 @@ package com.example.viewmodel
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.*
@@ -15,35 +16,183 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import javax.inject.Inject
+
+private const val DRAFT_PERSIST_DEBOUNCE_MS = 350L
+
+/** Serializable editor values only; audio payloads remain in app-owned files. */
+data class EditorMetadataDraft(
+    val editingId: Int?,
+    val title: String,
+    val poet: String,
+    val category: String,
+    val lyrics: String
+)
+
+data class EditorAttachmentDraft(
+    val existingAudioRemoved: Boolean,
+    val existingAudioType: String,
+    val existingAudioPath: String?,
+    val existingSecondaryAudioRemoved: Boolean,
+    val existingSecondaryAudioType: String,
+    val existingSecondaryAudioPath: String?,
+    val newAttachmentPath: String?,
+    val newAttachmentName: String?,
+    val finishedRecordingPath: String?
+)
+
+data class EditorDraft(
+    val active: Boolean = false,
+    val editingId: Int? = null,
+    val title: String = "",
+    val poet: String = "",
+    val category: String = NaatCategories.DEFAULT,
+    val lyrics: String = "",
+    val existingAudioRemoved: Boolean = false,
+    val existingAudioType: String = "none",
+    val existingAudioPath: String? = null,
+    val existingSecondaryAudioRemoved: Boolean = false,
+    val existingSecondaryAudioType: String = "none",
+    val existingSecondaryAudioPath: String? = null,
+    val existingFavorite: Boolean = false,
+    val existingCreatedAt: Long = 0L,
+    val newAttachmentPath: String? = null,
+    val newAttachmentName: String? = null,
+    val finishedRecordingPath: String? = null
+)
+
+/** True only when abandoning this draft would lose user-entered or user-attached work. */
+internal fun EditorDraft.hasUnsavedChanges(original: NaatEntity?): Boolean {
+    if (!active) return false
+
+    if (editingId == null) {
+        return title.isNotBlank() ||
+            poet.isNotBlank() ||
+            lyrics.isNotBlank() ||
+            category != NaatCategories.DEFAULT ||
+            newAttachmentPath != null ||
+            finishedRecordingPath != null
+    }
+
+    // If process restoration could not rehydrate the original row, be conservative:
+    // asking before discard is always safer than silently losing a recovered draft.
+    if (original == null || original.id != editingId) return true
+
+    return title != original.title ||
+        poet != original.poet.orEmpty() ||
+        NaatCategories.normalize(category) != NaatCategories.normalize(original.category) ||
+        lyrics != original.lyrics.orEmpty() ||
+        existingAudioRemoved ||
+        existingSecondaryAudioRemoved ||
+        newAttachmentPath != null ||
+        finishedRecordingPath != null
+}
 
 @HiltViewModel
 class NaatViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val savedStateHandle: SavedStateHandle,
     private val repository: NaatRepository,
     private val backupManager: BackupManager,
+    private val audioFiles: AudioFileLifecycleCoordinator,
     private val audioRecorder: AudioRecorder,
     val playbackController: PlaybackController,
     private val settingsStore: SettingsStore
 ) : ViewModel() {
 
+    private val draftStore = EditorDraftStore(savedStateHandle)
+    private val draftDiskStore = EditorDraftDiskStore(context)
+    // SavedStateHandle carries only lightweight draft metadata; disk owns lyrics.
+    private val initialDraft = draftStore.restore()
+    private val _editorDraft = MutableStateFlow(initialDraft)
+    private var draftPersistenceJob: Job? = null
+    private val draftPersistenceMutex = Mutex()
+    private var draftRevision = 0L
+    val editorDraft: StateFlow<EditorDraft> = _editorDraft.asStateFlow()
+    val editorEntryId: StateFlow<Int?> = editorDraft
+        .map { it.editingId }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, initialDraft.editingId)
+    val editorMetadata: StateFlow<EditorMetadataDraft> = editorDraft
+        .map { EditorMetadataDraft(it.editingId, it.title, it.poet, it.category, it.lyrics) }
+        .distinctUntilChanged()
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            EditorMetadataDraft(
+                initialDraft.editingId, initialDraft.title, initialDraft.poet,
+                initialDraft.category, initialDraft.lyrics
+            )
+        )
+    val editorAttachments: StateFlow<EditorAttachmentDraft> = editorDraft
+        .map {
+            EditorAttachmentDraft(
+                it.existingAudioRemoved, it.existingAudioType, it.existingAudioPath,
+                it.existingSecondaryAudioRemoved, it.existingSecondaryAudioType,
+                it.existingSecondaryAudioPath, it.newAttachmentPath,
+                it.newAttachmentName, it.finishedRecordingPath
+            )
+        }
+        .distinctUntilChanged()
+        .stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            EditorAttachmentDraft(
+                initialDraft.existingAudioRemoved, initialDraft.existingAudioType,
+                initialDraft.existingAudioPath, initialDraft.existingSecondaryAudioRemoved,
+                initialDraft.existingSecondaryAudioType, initialDraft.existingSecondaryAudioPath,
+                initialDraft.newAttachmentPath, initialDraft.newAttachmentName,
+                initialDraft.finishedRecordingPath
+            )
+        )
+
+    private val saveGate = OperationGate()
+    private val deleteGate = OperationGate()
+    private val attachmentGate = OperationGate()
+    private val recordingGate = OperationGate()
+    private val _isSaving = MutableStateFlow(false)
+    val isSaving: StateFlow<Boolean> = _isSaving.asStateFlow()
+    private val _isDeleting = MutableStateFlow(false)
+    val isDeleting: StateFlow<Boolean> = _isDeleting.asStateFlow()
+    private val _isAttachingFile = MutableStateFlow(false)
+    val isAttachingFile: StateFlow<Boolean> = _isAttachingFile.asStateFlow()
+    private val _isOpeningNowPlaying = MutableStateFlow(false)
+    val isOpeningNowPlaying: StateFlow<Boolean> = _isOpeningNowPlaying.asStateFlow()
+
     init {
-        // Housekeeping: delete audio files that lost their database entries
-        // (cancelled attachments, crashes mid-save, failed deletes, ...).
+        // Housekeeping is serialized with every create/adopt/save/delete/import path.
+        // It reads both the live draft snapshot and disk draft so startup can never
+        // classify an attachment created by a concurrent editor operation as orphaned.
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val referenced = repository.allNaats.first().mapNotNull { it.audioPath }.toSet()
-                listOf(
-                    getRecordingsDirectory(),
-                    getLinkedDirectory(),
-                    getImportedAudioDirectory()
-                ).forEach { dir ->
-                    dir.listFiles()?.forEach { file ->
-                        if (file.isFile && file.absolutePath !in referenced && file.delete()) {
-                            Log.d("NaatViewModel", "Cleaned orphaned audio file: ${file.name}")
+                audioFiles.exclusive {
+                    val referenced = buildSet {
+                        repository.allNaats.first().forEach { naat ->
+                            naat.audioPath?.let(::add)
+                            naat.secondaryAudioPath?.let(::add)
+                        }
+                        _editorDraft.value.newAttachmentPath?.let(::add)
+                        _editorDraft.value.finishedRecordingPath?.let(::add)
+                        draftDiskStore.read()?.takeIf { it.active }?.let { diskDraft ->
+                            diskDraft.newAttachmentPath?.let(::add)
+                            diskDraft.finishedRecordingPath?.let(::add)
+                        }
+                    }
+                    listOf(
+                        recordingsDirectory(),
+                        linkedDirectory(),
+                        importedAudioDirectory()
+                    ).forEach { dir ->
+                        dir.listFiles()?.forEach { file ->
+                            if (file.isFile && file.absolutePath !in referenced && file.delete()) {
+                                Log.d("NaatViewModel", "Cleaned orphaned audio file: ${file.name}")
+                            }
                         }
                     }
                 }
@@ -55,11 +204,11 @@ class NaatViewModel @Inject constructor(
 
     // Preferences & Settings are DataStore-backed; legacy values migrate in once.
 
-    // UI Navigation Screen State
-    private val _currentTab = MutableStateFlow(0) // 0: Library, 1: Add (via modal), 2: Settings
+    // UI Navigation Screen State. Add is a transient FAB action, not a tab.
+    private val _currentTab = MutableStateFlow(0) // 0: Library, 2: Settings
     val currentTab: StateFlow<Int> = _currentTab.asStateFlow()
 
-    private val _showAddModal = MutableStateFlow(false)
+    private val _showAddModal = MutableStateFlow(initialDraft.active)
     val showAddModal: StateFlow<Boolean> = _showAddModal.asStateFlow()
 
     private val _selectedNaat = MutableStateFlow<NaatEntity?>(null)
@@ -103,36 +252,34 @@ class NaatViewModel @Inject constructor(
         viewModelScope.launch { settingsStore.fontSize.collect { _globalFontSize.value = it } }
     }
 
-    // List of cataloged naats
-    val allNaats: StateFlow<List<NaatEntity>> = repository.allNaats
+    // Lightweight Library state: lyrics are never materialized for cards/folder counts.
+    val allSummaries: StateFlow<List<NaatSummary>> = repository.allSummaries
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Filtered list based on Search, Folders & the Favorites toggle
-    val filteredNaats: StateFlow<List<NaatEntity>> = combine(
-        allNaats,
-        _searchQuery,
+    /** Room-backed strict LIMIT 10 feed, ordered by newest create/edit timestamp. */
+    val recentSummaries: StateFlow<List<NaatSummary>> = repository.recentSummaries
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val categoryCounts: StateFlow<Map<String, Int>> = repository.categoryCounts
+        .map { rows -> rows.associate { NaatCategories.normalize(it.category) to it.count } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    @OptIn(kotlinx.coroutines.FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val filteredSummaries: StateFlow<List<NaatSummary>> = combine(
+        _searchQuery.debounce(160).distinctUntilChanged(),
         _selectedFolder,
         _showFavoritesOnly
-    ) { naats, query, folder, favoritesOnly ->
-        naats.filter { naat ->
-            val matchesFolder = if (folder != null) {
-                naat.category.equals(folder, ignoreCase = true)
-            } else {
-                true
-            }
-            val matchesSearch = if (query.isNotEmpty()) {
-                naat.title.contains(query, ignoreCase = true) ||
-                (naat.poet?.contains(query, ignoreCase = true) == true) ||
-                (naat.lyrics?.contains(query, ignoreCase = true) == true)
-            } else {
-                true
-            }
-            val matchesFavorite = !favoritesOnly || naat.isFavorite
-            matchesFolder && matchesSearch && matchesFavorite
+    ) { query, folder, favoritesOnly -> Triple(query.trim(), folder, favoritesOnly) }
+        .distinctUntilChanged()
+        .flatMapLatest { (query, folder, favoritesOnly) ->
+            // Room executes title/poet/lyrics matching on its query executor and returns only
+            // summary columns, avoiding full-lyrics scans and allocations on the UI thread.
+            repository.filteredSummaries(query, folder, favoritesOnly)
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Active recording file state (for adding a new Naat)
+    // Active recording file state (for adding a new Naat). File validation happens
+    // on IO during disk hydration, never while constructing the ViewModel on Main.
     private val _activeRecordingFile = MutableStateFlow<File?>(null)
     val activeRecordingFile: StateFlow<File?> = _activeRecordingFile.asStateFlow()
 
@@ -145,6 +292,30 @@ class NaatViewModel @Inject constructor(
 
     private val _recordingAmplitude = MutableStateFlow(0)
     val recordingAmplitude: StateFlow<Int> = _recordingAmplitude.asStateFlow()
+
+    init {
+        // Disk is authoritative for heavy draft text. Hydrate it even when a
+        // lightweight SavedStateHandle snapshot exists so process restoration never
+        // depends on a potentially Binder-sized lyrics bundle.
+        viewModelScope.launch(Dispatchers.IO) {
+            val diskDraft = runCatching { draftDiskStore.read() }.getOrNull()
+                ?.takeIf { it.active }
+            val candidate = diskDraft ?: _editorDraft.value.takeIf { it.active }
+            val activeFile = candidate?.finishedRecordingPath
+                ?.let(::File)
+                ?.takeIf { it.isFile }
+            withContext(Dispatchers.Main.immediate) {
+                if (draftRevision == 0L) {
+                    diskDraft?.let {
+                        _editorDraft.value = it
+                        draftStore.save(it)
+                        _showAddModal.value = true
+                    }
+                    _activeRecordingFile.value = activeFile
+                }
+            }
+        }
+    }
 
     private var recordingMeterJob: Job? = null
 
@@ -171,35 +342,115 @@ class NaatViewModel @Inject constructor(
         _recordingAmplitude.value = 0
     }
 
+    private fun cleanupDraftFilesAsync(draft: EditorDraft, activePath: String?) {
+        val paths = listOf(activePath, draft.finishedRecordingPath, draft.newAttachmentPath)
+        viewModelScope.launch {
+            audioFiles.exclusive {
+                withContext(Dispatchers.IO) {
+                    DraftFileCleanup.discard(
+                        listOf(draft.existingAudioPath, draft.existingSecondaryAudioPath),
+                        paths
+                    )
+                }
+            }
+        }
+    }
+
     // Backup & Restore status notifications
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
-    fun selectTab(index: Int) {
-        if (index == 1) {
-            _showAddModal.value = true
+    private fun persistDraft(draft: EditorDraft, immediate: Boolean = false) {
+        _editorDraft.value = draft
+        val revision = ++draftRevision
+        draftPersistenceJob?.cancel()
+
+        fun saveHandleIfCurrent() {
+            if (revision == draftRevision) draftStore.save(draft)
+        }
+        if (immediate) {
+            // Attachment/mode boundaries are rare and must survive immediately.
+            saveHandleIfCurrent()
+            draftPersistenceJob = viewModelScope.launch(Dispatchers.IO) {
+                draftPersistenceMutex.withLock {
+                    if (revision != draftRevision) return@withLock
+                    runCatching {
+                        if (draft.active) draftDiskStore.write(draft) else draftDiskStore.delete()
+                    }.onFailure { Log.e("NaatViewModel", "Draft snapshot failed", it) }
+                }
+            }
         } else {
-            _currentTab.value = index
+            // Typing stays purely in-memory. One snapshot is written after the user pauses,
+            // rather than rewriting every SavedStateHandle key and the full lyrics each keypress.
+            draftPersistenceJob = viewModelScope.launch {
+                delay(DRAFT_PERSIST_DEBOUNCE_MS)
+                saveHandleIfCurrent()
+                withContext(Dispatchers.IO) {
+                    draftPersistenceMutex.withLock {
+                        if (revision != draftRevision) return@withLock
+                        runCatching { draftDiskStore.write(draft) }
+                            .onFailure { Log.e("NaatViewModel", "Draft snapshot failed", it) }
+                    }
+                }
+            }
         }
     }
 
-    fun setShowAddModal(show: Boolean) {
-        _showAddModal.value = show
-        if (!show) {
-            // If cancelled, clean up any active temporary recording
-            _activeRecordingFile.value?.let { file ->
-                if (file.exists() && _recordingState.value == RecordingState.IDLE) {
-                    file.delete()
-                }
+    fun updateDraft(transform: (EditorDraft) -> EditorDraft) {
+        persistDraft(transform(_editorDraft.value))
+    }
+
+    private fun clearDraft() = persistDraft(EditorDraft(), immediate = true)
+
+    fun startAddDraft(forceFresh: Boolean = false) {
+        if (_editorDraft.value.active && !forceFresh) return
+        if (forceFresh) {
+            // Detach ownership immediately for responsive navigation. Native capture
+            // stops now; all file cleanup is serialized and runs on IO afterwards.
+            val old = _editorDraft.value
+            val activePath = if (_recordingState.value != RecordingState.IDLE) {
+                stopRecorderForDiscardOnMain()
+            } else {
+                _activeRecordingFile.value?.absolutePath.also { _activeRecordingFile.value = null }
             }
-            _activeRecordingFile.value = null
-            _recordingState.value = RecordingState.IDLE
-            _editingNaat.value = null
-            audioRecorder.stop()
-            // Stop only the UI-owned preview; service-owned entry playback survives.
             playbackController.stopPreview()
-            stopRecordingMeter()
+            cleanupDraftFilesAsync(old, activePath)
         }
+        persistDraft(EditorDraft(active = true), immediate = true)
+        _editingNaat.value = null
+        _showAddModal.value = true
+    }
+
+    fun selectTab(index: Int) {
+        // Library and Settings are persistent top-level tabs. Add is intentionally
+        // opened only through startAddDraft from the docked FAB.
+        if (index == 0 || index == 2) _currentTab.value = index
+    }
+
+    /** Used by the editor shell before an explicit X/Back discard request. */
+    fun hasUnsavedEditorChanges(): Boolean =
+        _editorDraft.value.hasUnsavedChanges(_editingNaat.value)
+
+    /** Explicit cancellation/discard. Recorder finalization always precedes file cleanup. */
+    fun setShowAddModal(show: Boolean) {
+        if (!show && !_showAddModal.value) return
+        if (show) {
+            if (!_editorDraft.value.active) startAddDraft() else _showAddModal.value = true
+            return
+        }
+        if (_isSaving.value || _isAttachingFile.value) return
+        val draft = _editorDraft.value
+        val activePath = if (_recordingState.value != RecordingState.IDLE) {
+            stopRecorderForDiscardOnMain()
+        } else {
+            _activeRecordingFile.value?.absolutePath.also { _activeRecordingFile.value = null }
+        }
+        // Stop only the UI-owned preview; service-owned entry playback survives.
+        playbackController.stopPreview()
+        cleanupDraftFilesAsync(draft, activePath)
+        _editingNaat.value = null
+        clearDraft()
+        _showAddModal.value = false
     }
 
     fun selectNaat(naat: NaatEntity?) {
@@ -217,18 +468,37 @@ class NaatViewModel @Inject constructor(
 
     /** Starts a media-session-owned listening session for an entry (from the reader). */
     fun startEntryPlayback(naat: NaatEntity) {
-        playbackController.playEntry(naat)
+        naat.audioPath?.let { playbackController.playEntry(naat, it) }
     }
 
-    /** Mini-player tap: jump straight back into the playing entry's reader. */
-    fun openNowPlayingEntry() {
-        val current = playbackController.nowPlaying.value ?: return
-        val entry = allNaats.value.firstOrNull { it.id == current.naatId }
-        if (entry != null) {
-            _selectedNaat.value = entry // direct set: reopening the SAME entry must not stop its audio
-        } else {
-            // Entry was deleted out from under the session
-            playbackController.stop()
+    fun startEntryPlayback(naat: NaatEntity, path: String) {
+        playbackController.playEntry(naat, path)
+    }
+
+    /** Mini-player tap: resolve through Room; the list flow may still hold its initial empty value. */
+    fun openNowPlayingEntry(onResolved: (Boolean) -> Unit = {}) {
+        if (_isOpeningNowPlaying.value) return
+        val requested = playbackController.nowPlaying.value ?: return
+        _isOpeningNowPlaying.value = true
+        viewModelScope.launch {
+            try {
+                val entry = repository.getNaatById(requested.naatId)
+                // Ignore a result for a session replaced while Room was queried.
+                if (playbackController.nowPlaying.value?.naatId != requested.naatId) return@launch
+                if (entry != null) {
+                    _selectedNaat.value = entry
+                    onResolved(true)
+                } else {
+                    playbackController.stop() // database confirmed deletion
+                    onResolved(false)
+                }
+            } catch (e: Exception) {
+                Log.e("NaatViewModel", "Unable to open now-playing entry", e)
+                _statusMessage.value = "Unable to open the playing entry: ${e.localizedMessage ?: "database error"}"
+                onResolved(false) // preserve playback when lookup itself failed
+            } finally {
+                _isOpeningNowPlaying.value = false
+            }
         }
     }
 
@@ -240,28 +510,115 @@ class NaatViewModel @Inject constructor(
         _searchQuery.value = query
     }
 
-    // --- Audio Recording Controls (For Add Naat Modal) ---
-    private fun getRecordingsDirectory(): File {
-        val dir = File(context.filesDir, "recordings")
-        if (!dir.exists()) {
-            dir.mkdirs()
+    // --- Audio recording and app-owned file lifecycle ---
+    private fun recordingsDirectory(): File = File(context.filesDir, "recordings")
+    private fun linkedDirectory(): File = File(context.filesDir, "linked")
+    private fun importedAudioDirectory(): File = File(context.filesDir, "audio")
+
+    private suspend fun ensureDirectoryOnIo(directory: File): File = withContext(Dispatchers.IO) {
+        if (!directory.exists() && !directory.mkdirs()) {
+            throw IOException("Could not create ${directory.name} directory")
         }
-        return dir
+        if (!directory.isDirectory) throw IOException("Invalid ${directory.name} directory")
+        directory
+    }
+
+    private suspend fun deleteOnIo(path: String?) = withContext(Dispatchers.IO) {
+        path?.let { runCatching { File(it).delete() } }
+    }
+
+    private suspend fun isUsableAudioFileOnIo(file: File?): Boolean = withContext(Dispatchers.IO) {
+        file?.isFile == true && file.length() > 0L
+    }
+
+    /** Called only while [audioFiles] is held. Native recorder calls stay on Main; file IO stays off it. */
+    private suspend fun finalizeRecordingLocked(expectedPath: String? = null): File? {
+        val file = _activeRecordingFile.value
+        // A queued Finish action must never finalize or mutate a newer take after
+        // the editor was closed/reopened while it waited for the lifecycle lock.
+        if (expectedPath != null && file?.absolutePath != expectedPath) return null
+        val stoppedCleanly = withContext(Dispatchers.Main.immediate) {
+            val stopped = audioRecorder.stop()
+            _recordingState.value = RecordingState.IDLE
+            stopRecordingMeter()
+            stopped
+        }
+        val valid = stoppedCleanly && isUsableAudioFileOnIo(file)
+        if (!valid) deleteOnIo(file?.absolutePath)
+        return withContext(Dispatchers.Main.immediate) {
+            if (valid && file != null) {
+                persistDraft(_editorDraft.value.copy(finishedRecordingPath = file.absolutePath))
+                file
+            } else {
+                _activeRecordingFile.value = null
+                persistDraft(_editorDraft.value.copy(finishedRecordingPath = null))
+                null
+            }
+        }
+    }
+
+    /** Stops native capture immediately for a discard/edit transition; file cleanup stays async on IO. */
+    private fun stopRecorderForDiscardOnMain(): String? {
+        val activePath = _activeRecordingFile.value?.absolutePath
+        audioRecorder.stop()
+        _recordingState.value = RecordingState.IDLE
+        stopRecordingMeter()
+        _activeRecordingFile.value = null
+        return activePath
     }
 
     fun startRecording() {
-        // A previously abandoned recording (never attached to an entry) is replaced — delete it
-        _activeRecordingFile.value?.let { old ->
-            if (old.exists()) viewModelScope.launch(Dispatchers.IO) { old.delete() }
-        }
-        playbackController.stop() // prevent playback feedback while capturing a fresh take
-        val timestamp = System.currentTimeMillis()
-        val file = File(getRecordingsDirectory(), "record_$timestamp.m4a")
-        _activeRecordingFile.value = file
-        audioRecorder.start(file)
-        _recordingState.value = audioRecorder.getRecordingState()
-        if (_recordingState.value == RecordingState.RECORDING) {
-            startRecordingMeter()
+        if (!recordingGate.tryStart()) return
+        viewModelScope.launch {
+            try {
+                audioFiles.exclusive {
+                    val draft = _editorDraft.value
+                    val requestedRevision = draftRevision
+                    if (!draft.active || !_showAddModal.value) return@exclusive
+                    val obsoletePaths = setOfNotNull(
+                        _activeRecordingFile.value?.absolutePath,
+                        draft.finishedRecordingPath
+                    ).filter {
+                        it != draft.existingAudioPath && it != draft.existingSecondaryAudioPath
+                    }
+                    val file = withContext(Dispatchers.IO) {
+                        obsoletePaths.forEach { path -> runCatching { File(path).delete() } }
+                        File(
+                            ensureDirectoryOnIo(recordingsDirectory()),
+                            "record_${System.currentTimeMillis()}.m4a"
+                        )
+                    }
+                    val started = withContext(Dispatchers.Main.immediate) {
+                        if (!_editorDraft.value.active || !_showAddModal.value ||
+                            draftRevision != requestedRevision
+                        ) {
+                            false
+                        } else {
+                            playbackController.stop() // prevent playback feedback while capturing a fresh take
+                            _activeRecordingFile.value = file
+                            persistDraft(draft.copy(finishedRecordingPath = file.absolutePath))
+                            val startedCleanly = audioRecorder.start(file)
+                            _recordingState.value = audioRecorder.getRecordingState()
+                            if (_recordingState.value == RecordingState.RECORDING) startRecordingMeter()
+                            startedCleanly && _recordingState.value == RecordingState.RECORDING
+                        }
+                    }
+                    if (!started) {
+                        deleteOnIo(file.absolutePath)
+                        withContext(Dispatchers.Main.immediate) {
+                            _activeRecordingFile.value = null
+                            persistDraft(_editorDraft.value.copy(finishedRecordingPath = null))
+                            stopRecordingMeter()
+                        }
+                        _statusMessage.value = "Unable to start recording"
+                    }
+                }
+            } catch (error: Exception) {
+                Log.e("NaatViewModel", "Unable to start recording", error)
+                _statusMessage.value = "Unable to start recording: ${error.localizedMessage ?: "storage error"}"
+            } finally {
+                recordingGate.finish()
+            }
         }
     }
 
@@ -277,210 +634,366 @@ class NaatViewModel @Inject constructor(
     }
 
     fun stopRecording() {
-        audioRecorder.stop()
-        _recordingState.value = RecordingState.IDLE
-        stopRecordingMeter()
+        if (!recordingGate.tryStart()) return
+        val requestedPath = _activeRecordingFile.value?.absolutePath
+        viewModelScope.launch {
+            try {
+                audioFiles.exclusive { finalizeRecordingLocked(requestedPath) }
+            } finally {
+                recordingGate.finish()
+            }
+        }
     }
 
-    /** Discard the finished take: stop playback, delete the file, reset state. */
+    /** Discard the current take. File deletion is serialized and always off Main. */
     fun discardRecording() {
-        audioRecorder.stop()
-        playbackController.stop()
-        _recordingState.value = RecordingState.IDLE
-        stopRecordingMeter()
-        _activeRecordingFile.value?.let { file ->
-            if (file.exists()) viewModelScope.launch(Dispatchers.IO) { file.delete() }
+        if (!recordingGate.tryStart()) return
+        val requestedPath = _activeRecordingFile.value?.absolutePath
+        viewModelScope.launch {
+            try {
+                audioFiles.exclusive {
+                    val file = _activeRecordingFile.value
+                    if (requestedPath == null || file?.absolutePath != requestedPath) return@exclusive
+                    withContext(Dispatchers.Main.immediate) {
+                        audioRecorder.stop()
+                        playbackController.stopPreview()
+                        _recordingState.value = RecordingState.IDLE
+                        stopRecordingMeter()
+                        _activeRecordingFile.value = null
+                        persistDraft(_editorDraft.value.copy(finishedRecordingPath = null))
+                    }
+                    deleteOnIo(file.absolutePath)
+                }
+            } finally {
+                recordingGate.finish()
+            }
         }
-        _activeRecordingFile.value = null
     }
 
     /** Open the add/edit modal pre-filled with an existing entry. */
     fun startEditNaat(naat: NaatEntity) {
-        // Editing the entry invalidates its playing session (attachment may change)
+        // Editing the entry invalidates its playing session (attachment may change).
         playbackController.stop()
+        val current = _editorDraft.value
+        if (!current.active || current.editingId != naat.id) {
+            if (current.active) {
+                val activePath = if (_recordingState.value != RecordingState.IDLE) {
+                    stopRecorderForDiscardOnMain()
+                } else {
+                    _activeRecordingFile.value?.absolutePath.also { _activeRecordingFile.value = null }
+                }
+                cleanupDraftFilesAsync(current, activePath)
+            }
+            persistDraft(EditorDraft(
+                active = true,
+                editingId = naat.id,
+                title = naat.title,
+                poet = naat.poet.orEmpty(),
+                category = NaatCategories.normalize(naat.category),
+                lyrics = naat.lyrics.orEmpty(),
+                existingAudioType = naat.audioType,
+                existingAudioPath = naat.audioPath,
+                existingSecondaryAudioType = naat.secondaryAudioType,
+                existingSecondaryAudioPath = naat.secondaryAudioPath,
+                existingFavorite = naat.isFavorite,
+                existingCreatedAt = naat.createdAt
+            ), immediate = true)
+        }
         _editingNaat.value = naat
         _showAddModal.value = true
     }
 
-    // --- Local Device File Attachment ---
-    private fun getLinkedDirectory(): File {
-        val dir = File(context.filesDir, "linked")
-        if (!dir.exists()) {
-            dir.mkdirs()
-        }
-        return dir
-    }
-
-    private fun getImportedAudioDirectory(): File {
-        val dir = File(context.filesDir, "audio")
-        if (!dir.exists()) {
-            dir.mkdirs()
-        }
-        return dir
-    }
-
-    // Runs on Dispatchers.IO: audio files can be tens of MB, and copying them
-    // on the main thread risks jank/ANRs.
-    suspend fun copyLocalFileToAppStorage(uri: Uri): File? = withContext(Dispatchers.IO) {
-        val fileName = "linked_${System.currentTimeMillis()}_file.mp3"
-        val destFile = File(getLinkedDirectory(), fileName)
+    // --- Local device file attachment ---
+    private suspend fun copyLocalFileToAppStorageLocked(uri: Uri): File? = withContext(Dispatchers.IO) {
+        val destination = File(
+            ensureDirectoryOnIo(linkedDirectory()),
+            "linked_${System.currentTimeMillis()}_file.mp3"
+        )
         try {
-            val input = context.contentResolver.openInputStream(uri)
-            if (input == null) {
-                null
-            } else {
-                input.use { inputStream ->
-                    FileOutputStream(destFile).use { outputStream ->
-                        inputStream.copyTo(outputStream)
+            val input = context.contentResolver.openInputStream(uri) ?: return@withContext null
+            input.use { inputStream ->
+                FileOutputStream(destination).use { outputStream ->
+                    inputStream.copyTo(outputStream)
+                    outputStream.fd.sync()
+                }
+            }
+            destination
+        } catch (error: Exception) {
+            Log.e("NaatViewModel", "Failed to copy local file", error)
+            runCatching { destination.delete() }
+            null
+        }
+    }
+
+    fun attachLocalFile(uri: Uri, onResult: (Boolean) -> Unit = {}) {
+        if (!attachmentGate.tryStart()) return
+        _isAttachingFile.value = true
+        viewModelScope.launch {
+            try {
+                val success = audioFiles.exclusive {
+                    val file = copyLocalFileToAppStorageLocked(uri)
+                    if (file != null && _editorDraft.value.active) {
+                        adoptLinkedFileLocked(file)
+                        true
+                    } else {
+                        deleteOnIo(file?.absolutePath)
+                        false
                     }
                 }
-                destFile
+                onResult(success)
+            } finally {
+                _isAttachingFile.value = false
+                attachmentGate.finish()
             }
-        } catch (e: Exception) {
-            Log.e("NaatViewModel", "Failed to copy local file", e)
-            destFile.delete() // remove any partially copied file
-            null
+        }
+    }
+
+    /** Called only while [audioFiles] is held; replaces a draft-owned linked file atomically. */
+    private suspend fun adoptLinkedFileLocked(file: File) {
+        if (_recordingState.value != RecordingState.IDLE) finalizeRecordingLocked()
+        withContext(Dispatchers.Main.immediate) { playbackController.stopPreview() }
+        val draft = _editorDraft.value
+        val superseded = draft.newAttachmentPath?.takeIf {
+            it != draft.existingAudioPath && it != draft.existingSecondaryAudioPath &&
+                it != file.absolutePath
+        }
+        deleteOnIo(superseded)
+        withContext(Dispatchers.Main.immediate) {
+            persistDraft(draft.copy(
+                newAttachmentPath = file.absolutePath,
+                newAttachmentName = "Attached file: ${file.name}"
+            ))
+        }
+    }
+
+    /** Public helper retained for callers that already own a copied app-private file. */
+    fun adoptLinkedFile(file: File) {
+        viewModelScope.launch {
+            audioFiles.exclusive { adoptLinkedFileLocked(file) }
         }
     }
 
     /** Deletes an app-owned file only when no database entry still references it. */
     fun deleteOrphanFile(path: String) {
-        viewModelScope.launch(Dispatchers.IO) { deleteAudioIfUnreferenced(path) }
+        viewModelScope.launch {
+            audioFiles.exclusive { deleteAudioIfUnreferencedLocked(path) }
+        }
     }
 
-    private suspend fun deleteAudioIfUnreferenced(path: String) = withContext(Dispatchers.IO) {
-        if (repository.countByAudioPath(path) > 0) return@withContext
-        val file = File(path).canonicalFile
-        val basePath = context.filesDir.canonicalPath + File.separator
-        if (file.path.startsWith(basePath) && file.isFile) {
-            file.delete()
+    /** Called only while [audioFiles] is held, closing the Room-count/delete TOCTOU window. */
+    private suspend fun deleteAudioIfUnreferencedLocked(path: String) {
+        if (repository.countByAudioPath(path) > 0) return
+        withContext(Dispatchers.IO) {
+            val file = File(path).canonicalFile
+            val basePath = context.filesDir.canonicalPath + File.separator
+            if (file.path.startsWith(basePath) && file.isFile) file.delete()
         }
     }
 
     // --- CRUD DB Operations ---
-    fun addNaat(
-        title: String,
-        poet: String?,
-        category: String,
-        lyrics: String?,
-        audioType: String,
-        audioPath: String?
-    ) {
-        // Always stop the recorder first — previously, saving mid-recording left the
-        // MediaRecorder running with no way to stop it (hot mic + half-written file).
-        audioRecorder.stop()
-        _recordingState.value = RecordingState.IDLE
-
-        // An instantly-stopped recording can be an empty/invalid file; don't attach it.
-        val finalAudioPath = if (audioType == "recorded" && audioPath != null) {
-            val f = File(audioPath)
-            if (f.exists() && f.length() > 0L) audioPath else {
-                f.delete()
-                null
-            }
-        } else {
-            audioPath
-        }
-        val finalAudioType = if (audioType == "recorded" && finalAudioPath == null) "none" else audioType
+    fun saveDraft() {
+        if (!saveGate.tryStart()) return
+        _isSaving.value = true
 
         viewModelScope.launch {
-            val naat = NaatEntity(
-                title = title,
-                poet = if (poet.isNullOrBlank()) null else poet,
-                category = category,
-                lyrics = if (lyrics.isNullOrBlank()) null else lyrics,
-                audioType = finalAudioType,
-                audioPath = finalAudioPath,
-                isFavorite = false
-            )
-            repository.insert(naat)
-            // Clear the recording reference BEFORE closing, so the modal cleanup in
-            // setShowAddModal(false) doesn't delete the file we just attached.
-            _activeRecordingFile.value = null
-            setShowAddModal(false)
+            try {
+                audioFiles.exclusive {
+                    if (_recordingState.value != RecordingState.IDLE) {
+                        finalizeRecordingLocked()
+                    } else {
+                        withContext(Dispatchers.Main.immediate) {
+                            audioRecorder.stop()
+                            stopRecordingMeter()
+                        }
+                    }
+
+                    var draft = _editorDraft.value
+                    val finishedRecording = draft.finishedRecordingPath
+                        ?.let(::File)
+                        ?.takeIf { isUsableAudioFileOnIo(it) }
+                    if (draft.finishedRecordingPath != null && finishedRecording == null) {
+                        deleteOnIo(draft.finishedRecordingPath)
+                        draft = draft.copy(finishedRecordingPath = null)
+                        withContext(Dispatchers.Main.immediate) { persistDraft(draft) }
+                    }
+
+                    fun existingPath(type: String): String? = when {
+                        !draft.existingAudioRemoved && draft.existingAudioType == type -> draft.existingAudioPath
+                        !draft.existingSecondaryAudioRemoved && draft.existingSecondaryAudioType == type ->
+                            draft.existingSecondaryAudioPath
+                        else -> null
+                    }
+
+                    val recordingPath = finishedRecording?.absolutePath ?: existingPath("recorded")
+                    val linkedPath = draft.newAttachmentPath ?: existingPath("local_file")
+                    val audioType = when {
+                        recordingPath != null -> "recorded"
+                        linkedPath != null -> "local_file"
+                        else -> "none"
+                    }
+                    val audioPath = recordingPath ?: linkedPath
+                    val secondaryAudioType = if (recordingPath != null && linkedPath != null) {
+                        "local_file"
+                    } else {
+                        "none"
+                    }
+                    val secondaryAudioPath = if (secondaryAudioType == "local_file") linkedPath else null
+                    val persistedAt = System.currentTimeMillis()
+
+                    val saved = if (draft.editingId == null) {
+                        val entity = NaatEntity(
+                            title = draft.title,
+                            poet = draft.poet.takeIf { it.isNotBlank() },
+                            category = draft.category,
+                            lyrics = draft.lyrics.takeIf { it.isNotBlank() },
+                            audioType = audioType,
+                            audioPath = audioPath,
+                            isFavorite = false,
+                            createdAt = persistedAt,
+                            updatedAt = persistedAt,
+                            secondaryAudioType = secondaryAudioType,
+                            secondaryAudioPath = secondaryAudioPath
+                        )
+                        val id = repository.insert(entity).toInt()
+                        entity.copy(id = id)
+                    } else {
+                        val entity = NaatEntity(
+                            id = draft.editingId,
+                            title = draft.title,
+                            poet = draft.poet.takeIf { it.isNotBlank() },
+                            category = draft.category,
+                            lyrics = draft.lyrics.takeIf { it.isNotBlank() },
+                            audioType = audioType,
+                            audioPath = audioPath,
+                            isFavorite = draft.existingFavorite,
+                            createdAt = draft.existingCreatedAt,
+                            updatedAt = persistedAt,
+                            secondaryAudioType = secondaryAudioType,
+                            secondaryAudioPath = secondaryAudioPath
+                        )
+                        repository.update(entity)
+                        entity
+                    }
+
+                    // The database row now owns retained files. Keep reference checks and
+                    // old-file cleanup inside the same lifecycle lock as this save.
+                    val retainedPaths = setOfNotNull(audioPath, secondaryAudioPath)
+                    setOfNotNull(draft.existingAudioPath, draft.existingSecondaryAudioPath)
+                        .filter { it !in retainedPaths }
+                        .forEach { oldPath ->
+                            try {
+                                deleteAudioIfUnreferencedLocked(oldPath)
+                            } catch (error: Exception) {
+                                Log.w("NaatViewModel", "Saved, but old audio cleanup failed", error)
+                            }
+                        }
+
+                    withContext(Dispatchers.Main.immediate) {
+                        _activeRecordingFile.value = null
+                        clearDraft()
+                        _editingNaat.value = null
+                        _showAddModal.value = false
+                        _recordingState.value = RecordingState.IDLE
+                        if (_selectedNaat.value?.id == saved.id) _selectedNaat.value = saved
+                        _statusMessage.value = if (draft.editingId == null) {
+                            "Notebook Entry Saved!"
+                        } else {
+                            "Entry Updated!"
+                        }
+                    }
+                }
+            } catch (error: Exception) {
+                Log.e("NaatViewModel", "Save failed", error)
+                _statusMessage.value = "Save failed: ${error.localizedMessage ?: "database error"}"
+                // Keep the modal and draft files intact so the user can retry.
+            } finally {
+                _isSaving.value = false
+                saveGate.finish()
+            }
         }
     }
 
-    /**
-     * Full edit of an existing entry. Attachments are preserved unless the user
-     * recorded a new take, linked a new file, or removed the attachment — in which
-     * case the previous app-owned audio file is deleted.
-     */
-    fun updateNaat(
+    fun toggleFavorite(naat: NaatEntity) = toggleFavorite(naat.id)
+
+    fun toggleFavorite(id: Int) {
+        viewModelScope.launch {
+            try {
+                val updated = repository.toggleFavorite(id) ?: return@launch
+                if (_selectedNaat.value?.id == id) _selectedNaat.value = updated
+                if (_editorDraft.value.editingId == id) {
+                    persistDraft(_editorDraft.value.copy(existingFavorite = updated.isFavorite))
+                }
+            } catch (e: Exception) {
+                Log.e("NaatViewModel", "Favorite toggle failed", e)
+                _statusMessage.value = "Could not update favorite"
+            }
+        }
+    }
+
+    fun loadNaat(
         id: Int,
-        title: String,
-        poet: String?,
-        category: String,
-        lyrics: String?,
-        audioType: String,
-        audioPath: String?,
-        isFavorite: Boolean,
-        createdAt: Long,
-        previousAudioPath: String?
+        onLoaded: (NaatEntity) -> Unit,
+        onFailure: () -> Unit = {}
     ) {
-        audioRecorder.stop()
-        playbackController.stop()
-        _recordingState.value = RecordingState.IDLE
-        stopRecordingMeter()
-
-        val finalAudioPath = if (audioType == "recorded" && audioPath != null) {
-            val f = File(audioPath)
-            if (f.exists() && f.length() > 0L) audioPath else {
-                f.delete()
-                null
-            }
-        } else {
-            audioPath
-        }
-        val finalAudioType = if (audioType == "recorded" && finalAudioPath == null) "none" else audioType
-
         viewModelScope.launch {
-            val updated = NaatEntity(
-                id = id,
-                title = title,
-                poet = if (poet.isNullOrBlank()) null else poet,
-                category = category,
-                lyrics = if (lyrics.isNullOrBlank()) null else lyrics,
-                audioType = finalAudioType,
-                audioPath = finalAudioPath,
-                isFavorite = isFavorite,
-                createdAt = createdAt
-            )
-            repository.update(updated)
-            // Imported backups may deduplicate audio across entries. Delete the
-            // replaced payload only after its final database reference is gone.
-            if (!previousAudioPath.isNullOrEmpty() && previousAudioPath != finalAudioPath) {
-                deleteAudioIfUnreferenced(previousAudioPath)
-            }
-            if (_selectedNaat.value?.id == id) {
-                _selectedNaat.value = updated // keep an open reader in sync
-            }
-            _activeRecordingFile.value = null
-            setShowAddModal(false)
-        }
-    }
-
-    fun toggleFavorite(naat: NaatEntity) {
-        viewModelScope.launch {
-            val updated = naat.copy(isFavorite = !naat.isFavorite)
-            repository.update(updated)
-            if (_selectedNaat.value?.id == naat.id) {
-                _selectedNaat.value = updated
+            try {
+                repository.getNaatById(id)?.let(onLoaded) ?: run {
+                    _statusMessage.value = "Entry no longer exists"
+                    onFailure()
+                }
+            } catch (error: Exception) {
+                Log.e("NaatViewModel", "Entry lookup failed", error)
+                _statusMessage.value = "Unable to open entry"
+                onFailure()
             }
         }
     }
 
-    fun deleteNaat(naat: NaatEntity) {
+    fun deleteNaat(id: Int, onSuccess: () -> Unit = {}) = deleteNaatInternal(id, onSuccess)
+
+    fun deleteNaat(naat: NaatEntity, onSuccess: () -> Unit = {}) =
+        deleteNaatInternal(naat.id, onSuccess)
+
+    private fun deleteNaatInternal(id: Int, onSuccess: () -> Unit) {
+        if (!deleteGate.tryStart()) return
+        _isDeleting.value = true
         viewModelScope.launch {
-            if (playbackController.nowPlaying.value?.naatId == naat.id) {
-                playbackController.stop()
-            }
-            repository.delete(naat)
-            // A v2 backup can make several entries share one content-addressed
-            // audio file; keep it until the final reference is deleted.
-            naat.audioPath?.let { deleteAudioIfUnreferenced(it) }
-            if (_selectedNaat.value?.id == naat.id) {
-                _selectedNaat.value = null
+            try {
+                val deleted = audioFiles.exclusive {
+                    // Resolve the row inside the lifecycle lock so a concurrent save
+                    // cannot make cleanup decisions from stale attachment paths.
+                    val current = repository.getNaatById(id) ?: return@exclusive null
+                    repository.delete(current)
+                    withContext(Dispatchers.Main.immediate) {
+                        if (playbackController.nowPlaying.value?.naatId == current.id) {
+                            playbackController.stop()
+                        }
+                    }
+                    setOfNotNull(current.audioPath, current.secondaryAudioPath)
+                        .forEach { path ->
+                            try {
+                                deleteAudioIfUnreferencedLocked(path)
+                            } catch (error: Exception) {
+                                Log.w("NaatViewModel", "Deleted row, but audio cleanup failed", error)
+                            }
+                        }
+                    current
+                }
+                withContext(Dispatchers.Main.immediate) {
+                    if (deleted == null) {
+                        _statusMessage.value = "Entry no longer exists"
+                    } else {
+                        if (_selectedNaat.value?.id == deleted.id) _selectedNaat.value = null
+                        _statusMessage.value = "Entry deleted"
+                        onSuccess()
+                    }
+                }
+            } catch (error: Exception) {
+                Log.e("NaatViewModel", "Delete failed", error)
+                _statusMessage.value = "Delete failed: ${error.localizedMessage ?: "database error"}"
+            } finally {
+                _isDeleting.value = false
+                deleteGate.finish()
             }
         }
     }
@@ -533,18 +1046,18 @@ class NaatViewModel @Inject constructor(
     fun onAppBackgrounded() {
         // Entry sessions survive; UI-owned previews do not.
         playbackController.stopPreview()
-        if (_recordingState.value != RecordingState.IDLE) {
-            audioRecorder.stop()
-            _recordingState.value = RecordingState.IDLE
-            stopRecordingMeter()
-        }
+        if (_recordingState.value != RecordingState.IDLE) stopRecording()
+        if (_editorDraft.value.active) persistDraft(_editorDraft.value, immediate = true)
     }
 
     override fun onCleared() {
-        super.onCleared()
-        // PlaybackController is process-scoped; ViewModel teardown must not end
-        // a service-owned listening session.
+        // PlaybackController is process-scoped; ViewModel teardown must not end a
+        // service-owned listening session. Do not synchronously delete files here:
+        // onCleared runs on Main and the next process startup's serialized orphan
+        // sweep owns abandoned draft cleanup safely.
         audioRecorder.stop()
+        playbackController.stopPreview()
         stopRecordingMeter()
+        super.onCleared()
     }
 }

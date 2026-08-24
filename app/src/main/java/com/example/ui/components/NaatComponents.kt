@@ -56,153 +56,121 @@ import com.example.ui.theme.NastaliqFamily
 import com.example.ui.theme.HighContrastRed
 import com.example.ui.theme.HighContrastGray
 import com.example.viewmodel.NaatViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 
-// --- Dynamic Bottom Navigation Bar ---
+// --- Bottom app bar with a real docked Material FAB ---
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NaatBottomNavigation(
     currentTab: Int,
-    onTabSelected: (Int) -> Unit
+    onTabSelected: (Int) -> Unit,
+    onAddRequested: () -> Unit
 ) {
     // Child composables must NEVER re-read the system dark flag: the app's
     // explicit White/Black/System mode is already resolved into the colorScheme.
-    // Trusting the scheme keeps every component consistent with the chosen mode.
-    val bg = MaterialTheme.colorScheme.background
-    val textAndIconsColor = MaterialTheme.colorScheme.onBackground
-    val borderCol = MaterialTheme.colorScheme.outline
+    val background = MaterialTheme.colorScheme.background
+    val foreground = MaterialTheme.colorScheme.onBackground
 
-    Column(
+    BottomAppBar(
         modifier = Modifier
-            .background(bg)
-            .navigationBarsPadding()
-    ) {
-        // Divider line at top matching HTML's border-t border-[#1F1F1F]
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(borderCol)
-        )
+            .fillMaxWidth()
+            .testTag("bottom_app_bar"),
+        containerColor = background,
+        contentColor = foreground,
+        tonalElevation = 4.dp,
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        actions = {
+            BottomBarTab(
+                label = "LIBRARY",
+                icon = Icons.Default.Home,
+                selected = currentTab == 0,
+                onClick = { onTabSelected(0) },
+                modifier = Modifier.weight(1f),
+                testTag = "nav_tab_library"
+            )
 
-        // Custom Navigation Bar Row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp, horizontal = 24.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // 1. My Library Tab
-            val isLibrarySelected = currentTab == 0
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable(
-                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                        indication = null,
-                        // Active destinations are deliberately inert: dispatching
-                        // another navigate() for the same route restarts its
-                        // transition and causes a visible full-screen flash.
-                        onClick = { if (!isLibrarySelected) onTabSelected(0) }
-                    )
-                    .testTag("nav_tab_library"),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(100))
-                        .background(
-                            if (isLibrarySelected) textAndIconsColor.copy(alpha = 0.1f)
-                            else Color.Transparent
-                        )
-                        .padding(horizontal = 20.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Home,
-                        contentDescription = "My Library",
-                        tint = if (isLibrarySelected) textAndIconsColor else textAndIconsColor.copy(alpha = 0.5f),
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-                Text(
-                    text = "LIBRARY",
-                    fontSize = 10.sp,
-                    fontWeight = if (isLibrarySelected) FontWeight.Bold else FontWeight.Medium,
-                    color = if (isLibrarySelected) textAndIconsColor else textAndIconsColor.copy(alpha = 0.5f),
-                    letterSpacing = 0.5.sp
-                )
-            }
-
-            // 2. Middle floating prominent "+" Button raised up
+            // Add is an app action, not a third navigation destination. Using the
+            // Material FAB gives it true elevation, touch feedback, and semantics.
             Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .offset(y = (-16).dp),
+                modifier = Modifier.weight(1f),
                 contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(textAndIconsColor)
-                        .clickable { onTabSelected(1) }
-                        .testTag("nav_tab_add"),
-                    contentAlignment = Alignment.Center
+                FloatingActionButton(
+                    onClick = onAddRequested,
+                    modifier = Modifier.testTag("nav_tab_add"),
+                    containerColor = foreground,
+                    contentColor = background,
+                    elevation = FloatingActionButtonDefaults.elevation()
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
                         contentDescription = "Add new entry",
-                        tint = bg,
                         modifier = Modifier.size(28.dp)
                     )
                 }
             }
 
-            // 3. App Settings Tab
-            val isSettingsSelected = currentTab == 2
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable(
-                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                        indication = null,
-                        onClick = { if (!isSettingsSelected) onTabSelected(2) }
-                    )
-                    .testTag("nav_tab_settings"),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(100))
-                        .background(
-                            if (isSettingsSelected) textAndIconsColor.copy(alpha = 0.1f)
-                            else Color.Transparent
-                        )
-                        .padding(horizontal = 20.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = "App Settings",
-                        tint = if (isSettingsSelected) textAndIconsColor else textAndIconsColor.copy(alpha = 0.5f),
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-                Text(
-                    text = "SETTINGS",
-                    fontSize = 10.sp,
-                    fontWeight = if (isSettingsSelected) FontWeight.Bold else FontWeight.Medium,
-                    color = if (isSettingsSelected) textAndIconsColor else textAndIconsColor.copy(alpha = 0.5f),
-                    letterSpacing = 0.5.sp
-                )
-            }
+            BottomBarTab(
+                label = "SETTINGS",
+                icon = Icons.Default.Settings,
+                selected = currentTab == 2,
+                onClick = { onTabSelected(2) },
+                modifier = Modifier.weight(1f),
+                testTag = "nav_tab_settings"
+            )
         }
+    )
+}
+
+@Composable
+private fun BottomBarTab(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    testTag: String
+) {
+    val foreground = MaterialTheme.colorScheme.onBackground
+    Column(
+        modifier = modifier
+            .heightIn(min = 64.dp)
+            .clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+                // Re-selecting an active top-level tab must remain inert; otherwise
+                // it can restart UI work and cause the visual flash P4e removed.
+                onClick = { if (!selected) onClick() }
+            )
+            .testTag(testTag),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(100))
+                .background(if (selected) foreground.copy(alpha = 0.10f) else Color.Transparent)
+                .padding(horizontal = 20.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label.lowercase().replaceFirstChar { it.titlecase() },
+                tint = if (selected) foreground else foreground.copy(alpha = 0.55f),
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) foreground else foreground.copy(alpha = 0.55f),
+            letterSpacing = 0.5.sp
+        )
     }
 }
 
@@ -213,9 +181,9 @@ fun GlobalMiniPlayer(
     onOpen: () -> Unit
 ) {
     val controller = viewModel.playbackController
-    val nowPlaying by controller.nowPlaying.collectAsState()
-    val hasSession by controller.hasActiveSession.collectAsState()
-    val isPlaying by controller.isPlaying.collectAsState()
+    val nowPlaying by controller.nowPlaying.collectAsStateWithLifecycle()
+    val hasSession by controller.hasActiveSession.collectAsStateWithLifecycle()
+    val isPlaying by controller.isPlaying.collectAsStateWithLifecycle()
 
     val current = nowPlaying
     if (current == null || !hasSession) return
@@ -327,10 +295,10 @@ fun AudioAttachmentPreview(
     viewModel: NaatViewModel
 ) {
     val controller = viewModel.playbackController
-    val activePreviewPath by controller.previewPath.collectAsState()
-    val playerIsPlaying by controller.isPlaying.collectAsState()
-    val currentPos by controller.currentPosition.collectAsState()
-    val duration by controller.duration.collectAsState()
+    val activePreviewPath by controller.previewPath.collectAsStateWithLifecycle()
+    val playerIsPlaying by controller.isPlaying.collectAsStateWithLifecycle()
+    val currentPos by controller.currentPosition.collectAsStateWithLifecycle()
+    val duration by controller.duration.collectAsStateWithLifecycle()
     val ownsPreview = activePreviewPath == path && controller.ownsPreview(path)
     val isPlaying = ownsPreview && playerIsPlaying
 

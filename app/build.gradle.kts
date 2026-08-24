@@ -30,18 +30,42 @@ android {
   }
 
   buildTypes {
-    release {
+    // The immutable CI workflow publishes app-debug.apk. Make that artifact a real
+    // release-like test build: it is debug-signed for installation, but not debuggable
+    // and uses the same R8/resource-shrinking policy as release.
+    getByName("debug") {
+      isDebuggable = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       isCrunchPngs = false
+      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+    }
+
+    // Keep an explicitly named unminified variant for Android Studio development.
+    // It has a separate package name so it can coexist with the release-like test app.
+    create("dev") {
+      initWith(getByName("debug"))
+      isDebuggable = true
       isMinifyEnabled = false
+      isShrinkResources = false
+      applicationIdSuffix = ".dev"
+      versionNameSuffix = "-dev"
+      matchingFallbacks += listOf("debug")
+    }
+
+    release {
+      isDebuggable = false
+      isCrunchPngs = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       // Only sign release builds when a real upload keystore is available,
-      // so local/CI builds don't fail looking for a keystore that isn't checked in.
+      // so local/CI validation does not require a keystore checked into the repository.
       val releaseKeystore = File(System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks")
       if (releaseKeystore.exists()) {
         signingConfig = signingConfigs.getByName("release")
       }
     }
-    // debug builds use AGP's default auto-generated debug keystore
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -62,6 +86,16 @@ hilt {
   enableAggregatingTask = true
 }
 
+tasks.configureEach {
+  if (name == "assembleDebug") dependsOn("testDebugUnitTest")
+}
+tasks.withType<Test>().configureEach {
+  filter {
+    // The sample context smoke test adds no product coverage; run all focused tests.
+    excludeTestsMatching("*.ExampleRobolectricTest")
+  }
+}
+
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
   implementation(libs.hilt.android)
@@ -75,7 +109,9 @@ dependencies {
   implementation(libs.androidx.core.ktx)
   implementation(libs.androidx.core.splashscreen)
   implementation(libs.androidx.datastore.preferences)
-  implementation(libs.androidx.media)
+  implementation(libs.androidx.media3.common)
+  implementation(libs.androidx.media3.exoplayer)
+  implementation(libs.androidx.media3.session)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
@@ -95,8 +131,10 @@ dependencies {
   androidTestImplementation(libs.androidx.espresso.core)
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.androidx.runner)
-  debugImplementation(libs.androidx.compose.ui.test.manifest)
-  debugImplementation(libs.androidx.compose.ui.tooling)
+  // Inspection and Compose test-manifest support are intentionally absent from the
+  // optimized CI handoff APK; use assembleDev when working in Android Studio.
+  add("devImplementation", libs.androidx.compose.ui.test.manifest)
+  add("devImplementation", libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.hilt.compiler)
 }

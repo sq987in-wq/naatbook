@@ -5,7 +5,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [NaatEntity::class], version = 2, exportSchema = true)
+@Database(entities = [NaatEntity::class], version = 4, exportSchema = true)
 abstract class NaatDatabase : RoomDatabase() {
 
     abstract fun naatDao(): NaatDao
@@ -15,8 +15,8 @@ abstract class NaatDatabase : RoomDatabase() {
          * v1 -> v2: category/taxonomy restructure. The schema is untouched
          * (category is a plain String column); only the stored values are
          * remapped onto the new taxonomy and the "Audio Only" pseudo-folder
-         * disappears. Registering this Migration explicitly is what prevents
-         * fallbackToDestructiveMigration from wiping user data on upgrade.
+         * disappears. The production builder has no destructive fallback, so
+         * every future schema change must also provide an explicit migration.
          */
         internal val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -29,6 +29,27 @@ abstract class NaatDatabase : RoomDatabase() {
                     "UPDATE naats SET category = 'Others' WHERE category NOT IN " +
                         "('Naat', 'Hamd', 'Manqabat', 'Salam', 'Qasida', 'Nasheed', 'My Kalam', 'Others')"
                 )
+            }
+        }
+
+        /** v2 -> v3: preserve an independent second audio attachment per entry. */
+        internal val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE naats ADD COLUMN secondaryAudioType TEXT NOT NULL DEFAULT 'none'"
+                )
+                db.execSQL("ALTER TABLE naats ADD COLUMN secondaryAudioPath TEXT")
+            }
+        }
+
+        /** v3 -> v4: stable modification time for a Room-backed Recent Notebooks list. */
+        internal val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE naats ADD COLUMN updatedAt INTEGER NOT NULL DEFAULT 0")
+                // Existing entries have no historical edit timestamp; creation time is the
+                // only truthful initial ordering until their next saved edit.
+                db.execSQL("UPDATE naats SET updatedAt = createdAt WHERE updatedAt = 0")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_naats_updatedAt ON naats(updatedAt)")
             }
         }
     }

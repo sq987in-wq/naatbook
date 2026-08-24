@@ -13,7 +13,6 @@ class AudioRecorder @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     private var mediaRecorder: MediaRecorder? = null
-    private var currentOutputFile: File? = null
     private var isRecording = false
     private var isPaused = false
 
@@ -22,16 +21,19 @@ class AudioRecorder @Inject constructor(
     private var pausedTimestampMs = 0L
     private var accumulatedPauseMs = 0L
 
-    fun start(outputFile: File) {
+    /** Starts capture and returns false after releasing native state on any setup failure. */
+    fun start(outputFile: File): Boolean {
         stop()
         try {
-            currentOutputFile = outputFile
-            mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 MediaRecorder(context)
             } else {
                 @Suppress("DEPRECATION")
                 MediaRecorder()
-            }.apply {
+            }
+            // Publish before configuration: prepare/start can throw and catch must release it.
+            mediaRecorder = recorder
+            recorder.apply {
                 setAudioSource(MediaRecorder.AudioSource.MIC)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
@@ -44,14 +46,16 @@ class AudioRecorder @Inject constructor(
             pausedTimestampMs = 0L
             isRecording = true
             isPaused = false
+            return true
         } catch (e: Exception) {
             Log.e("AudioRecorder", "Failed to start recording", e)
-            // Never leak the native recorder when start fails
+            // Never leak the native recorder. File cleanup is owned by the shared
+            // lifecycle coordinator so it never runs on the UI thread or races a save.
             try { mediaRecorder?.release() } catch (_: Exception) {}
             mediaRecorder = null
-            currentOutputFile = null
             isRecording = false
             isPaused = false
+            return false
         }
     }
 
@@ -79,22 +83,37 @@ class AudioRecorder @Inject constructor(
         }
     }
 
-    fun stop() {
+    /**
+     * Stops and releases native capture state. The caller owns output validation and
+     * deletion through the shared audio-file lifecycle coordinator.
+     */
+    fun stop(): Boolean {
+        // Detach first so no callback/query can observe a recorder being torn down.
+        val recorder = mediaRecorder
+        mediaRecorder = null
+        var stoppedCleanly = true
         try {
-            mediaRecorder?.apply {
-                stop()
-                release()
+            if (recorder != null) {
+                NativeResourceSafety.stopAndRelease(
+                    stop = { recorder.stop() },
+                    release = {
+                        try { recorder.release() } catch (e: Exception) {
+                            Log.e("AudioRecorder", "Error releasing recorder", e)
+                        }
+                    }
+                )
             }
         } catch (e: Exception) {
             Log.e("AudioRecorder", "Error stopping recorder", e)
+            stoppedCleanly = false
         } finally {
-            mediaRecorder = null
             isRecording = false
             isPaused = false
             startTimestampMs = 0L
             accumulatedPauseMs = 0L
             pausedTimestampMs = 0L
         }
+        return stoppedCleanly
     }
 
     /** Elapsed recording time in ms, excluding paused intervals. */

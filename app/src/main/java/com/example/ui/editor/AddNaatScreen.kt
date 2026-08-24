@@ -2,637 +2,485 @@ package com.example.ui.editor
 
 import android.app.Activity
 import android.content.Intent
-import android.net.Uri
 import android.speech.RecognizerIntent
-import android.view.WindowManager
 import android.widget.Toast
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.*
-import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.automirrored.filled.*
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
-import androidx.compose.ui.res.painterResource
-import com.example.R
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.audio.RecordingState
 import com.example.data.NaatCategories
-import com.example.data.NaatEntity
-import com.example.ui.theme.MyApplicationTheme
-import com.example.ui.theme.NastaliqFamily
-import com.example.ui.theme.HighContrastRed
+import com.example.ui.components.AudioAttachmentPreview
+import com.example.ui.components.RecordingVuMeter
+import com.example.ui.components.formatTime
+import com.example.ui.components.usesArabicScript
 import com.example.ui.theme.HighContrastGray
+import com.example.ui.theme.HighContrastRed
+import com.example.ui.theme.NastaliqFamily
+import com.example.viewmodel.EditorAttachmentDraft
 import com.example.viewmodel.NaatViewModel
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import java.io.File
 
-import com.example.ui.components.*
-
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+/** Keyed lazy editor: only visible sections are composed and high-frequency media state is local. */
 @Composable
 fun AddNaatModal(
     viewModel: NaatViewModel,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-
-    // Edit mode: fields are pre-filled from the entry being edited (null = add new)
-    val editingNaat by viewModel.editingNaat.collectAsState()
-
-    var title by remember { mutableStateOf(editingNaat?.title ?: "") }
-    var poet by remember { mutableStateOf(editingNaat?.poet ?: "") }
-    // Category prefill: normalized defensively so a legacy label (or a blank)
-    // can never end up pre-selected outside the current taxonomy.
-    var selectedCategory by remember {
-        mutableStateOf(
-            editingNaat?.category?.let { NaatCategories.normalize(it) } ?: NaatCategories.DEFAULT
-        )
-    }
-    var lyrics by remember { mutableStateOf(editingNaat?.lyrics ?: "") }
-    var existingAudioRemoved by remember { mutableStateOf(false) }
-
-    var showCategoryDropdown by remember { mutableStateOf(false) }
-
-    val recordingState by viewModel.recordingState.collectAsState()
-    val activeRecordingFile by viewModel.activeRecordingFile.collectAsState()
-    val recordingElapsedMs by viewModel.recordingElapsedMs.collectAsState()
-    val recordingAmplitude by viewModel.recordingAmplitude.collectAsState()
-
-    // Linked local file attachment state
-    var linkedFileUriStr by remember { mutableStateOf<String?>(null) }
-    var linkedFileName by remember { mutableStateOf<String?>(null) }
-    var isAttachingFile by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-
-    // Audio picker launcher for mp3/m4a devices files
-    val audioPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent(),
-        onResult = { uri ->
-            if (uri != null) {
-                isAttachingFile = true
-                scope.launch {
-                    // Copy runs on Dispatchers.IO inside the ViewModel (no UI-thread jank)
-                    val copiedFile = viewModel.copyLocalFileToAppStorage(uri)
-                    isAttachingFile = false
-                    if (copiedFile != null) {
-                        linkedFileUriStr = copiedFile.absolutePath
-                        linkedFileName = "Attached file: " + copiedFile.name
-                        Toast.makeText(context, "Audio file attached successfully!", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(context, "Failed to copy audio attachment", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-        }
-    )
-
-    // Permission request launcher
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = { isGranted ->
-            if (isGranted) {
-                viewModel.startRecording()
-            } else {
-                Toast.makeText(context, "Microphone permission is required to record voice notes", Toast.LENGTH_LONG).show()
-            }
-        }
-    )
-
-    // Lyrics dictation (voice typing): recognized speech is APPENDED as a new
-    // line below the existing lyrics - dictation never overwrites typed text.
-    val lyricsDictationLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult(),
-        onResult = { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                val spoken = result.data
-                    ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                    ?.firstOrNull()
-                    ?.trim()
-                    .orEmpty()
-                if (spoken.isNotEmpty()) {
-                    lyrics = if (lyrics.isBlank()) spoken else lyrics.trimEnd() + "\n" + spoken
-                }
-            }
-        }
-    )
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
+    // The non-draggable editor sheet constrains this list's height. Keeping a
+    // single LazyColumn avoids nested scroll jank with the IME.
+    LazyColumn(
+        modifier = modifier
+            .fillMaxWidth()
             .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState())
+            .navigationBarsPadding()
+            .imePadding(),
+        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Modal Header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+        item(key = "header") { EditorHeader(viewModel, onClose) }
+        item(key = "metadata") { EditorMetadataSection(viewModel) }
+        item(key = "audio") { EditorAudioSection(viewModel) }
+        item(key = "save") { EditorSaveSection(viewModel) }
+        item(key = "bottom-space") { Spacer(Modifier.height(8.dp)) }
+    }
+}
+
+@Composable
+private fun EditorHeader(viewModel: NaatViewModel, onClose: () -> Unit) {
+    val editingId by viewModel.editorEntryId.collectAsStateWithLifecycle()
+    val isSaving by viewModel.isSaving.collectAsStateWithLifecycle()
+    val isAttaching by viewModel.isAttachingFile.collectAsStateWithLifecycle()
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            if (editingId != null) "Edit Notebook Entry" else "Add New Notebook Entry",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold
+        )
+        IconButton(
+            onClick = onClose,
+            enabled = !isSaving && !isAttaching,
+            modifier = Modifier.testTag("close_add_modal")
         ) {
-            Text(
-                text = if (editingNaat != null) "Edit Notebook Entry" else "Add New Notebook Entry",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-            IconButton(
-                onClick = onClose,
-                modifier = Modifier.testTag("close_add_modal")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Close modal",
-                    tint = MaterialTheme.colorScheme.onBackground
-                )
+            Icon(Icons.Default.Close, contentDescription = "Close modal")
+        }
+    }
+}
+
+@Composable
+private fun EditorMetadataSection(viewModel: NaatViewModel) {
+    val context = LocalContext.current
+    val metadata by viewModel.editorMetadata.collectAsStateWithLifecycle()
+    var showCategoryDropdown by remember { mutableStateOf(false) }
+    val lyricsDictationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spoken = result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()?.trim().orEmpty()
+            if (spoken.isNotEmpty()) {
+                viewModel.updateDraft {
+                    it.copy(lyrics = if (it.lyrics.isBlank()) spoken else it.lyrics.trimEnd() + "\n" + spoken)
+                }
             }
         }
+    }
 
-        Spacer(modifier = Modifier.height(16.dp))
+    val folderState = if (showCategoryDropdown) "expanded" else "collapsed"
 
-        // Text Editor Input Fields
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         OutlinedTextField(
-            value = title,
-            onValueChange = { title = it },
+            value = metadata.title,
+            onValueChange = { value -> viewModel.updateDraft { it.copy(title = value) } },
             label = { Text("Title (Required)") },
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("add_naat_title"),
+            modifier = Modifier.fillMaxWidth().testTag("add_naat_title"),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
             singleLine = true
         )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
         OutlinedTextField(
-            value = poet,
-            onValueChange = { poet = it },
+            value = metadata.poet,
+            onValueChange = { value -> viewModel.updateDraft { it.copy(poet = value) } },
             label = { Text("Poet Name (Optional)") },
-            modifier = Modifier
-                .fillMaxWidth()
-                .testTag("add_naat_poet"),
+            modifier = Modifier.fillMaxWidth().testTag("add_naat_poet"),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
             singleLine = true
         )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Category Selector Dropdown
-        ExposedDropdownMenuBox(
-            expanded = showCategoryDropdown,
-            onExpandedChange = { showCategoryDropdown = !showCategoryDropdown }
-        ) {
+        Box(Modifier.fillMaxWidth()) {
+            // The read-only field stays visually consistent with the rest of the
+            // editor. A single full-size semantic overlay owns all activation so
+            // every part of the input—not just the trailing affordance—opens it.
             OutlinedTextField(
-                value = selectedCategory,
+                value = metadata.category,
                 onValueChange = {},
                 readOnly = true,
                 label = { Text("Folder Location") },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = showCategoryDropdown) },
+                trailingIcon = {
+                    Icon(
+                        imageVector = if (showCategoryDropdown) {
+                            Icons.Default.KeyboardArrowUp
+                        } else {
+                            Icons.Default.KeyboardArrowDown
+                        },
+                        contentDescription = null
+                    )
+                },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .menuAnchor(),
-                colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
+                    .clearAndSetSemantics { }
             )
-            ExposedDropdownMenu(
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "Folder Location"
+                        stateDescription = "${metadata.category}, $folderState"
+                    }
+                    .clickable(role = Role.DropdownList) {
+                        showCategoryDropdown = !showCategoryDropdown
+                    }
+                    .testTag("folder_location_dropdown")
+            )
+            DropdownMenu(
                 expanded = showCategoryDropdown,
                 onDismissRequest = { showCategoryDropdown = false }
             ) {
-                NaatCategories.ALL.forEach { cat ->
+                NaatCategories.ALL.forEach { category ->
                     DropdownMenuItem(
-                        text = { Text(cat) },
+                        text = { Text(category) },
                         onClick = {
-                            selectedCategory = cat
+                            viewModel.updateDraft { it.copy(category = category) }
                             showCategoryDropdown = false
                         }
                     )
                 }
             }
         }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
         OutlinedTextField(
-            value = lyrics,
-            onValueChange = { lyrics = it },
-            label = { Text("Lyrics Text Area (Optional)") },
-            // Nastaliq the moment the content turns to Urdu/Arabic script
+            value = metadata.lyrics,
+            onValueChange = { value -> viewModel.updateDraft { it.copy(lyrics = value) } },
+            label = { Text("Lyrics") },
+            placeholder = { Text("Add lyrics here...") },
             textStyle = LocalTextStyle.current.copy(
-                fontFamily = if (usesArabicScript(lyrics)) NastaliqFamily else FontFamily.Default,
-                lineHeight = if (usesArabicScript(lyrics)) 32.sp else LocalTextStyle.current.lineHeight
+                fontFamily = if (usesArabicScript(metadata.lyrics)) NastaliqFamily else FontFamily.Default,
+                lineHeight = if (usesArabicScript(metadata.lyrics)) 32.sp else LocalTextStyle.current.lineHeight
             ),
             trailingIcon = {
                 IconButton(
                     onClick = {
                         try {
-                            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            lyricsDictationLauncher.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                putExtra(
+                                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                                )
                                 putExtra(RecognizerIntent.EXTRA_PROMPT, "Dictate the kalam...")
-                            }
-                            lyricsDictationLauncher.launch(intent)
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Speech-to-Text not supported on this device", Toast.LENGTH_SHORT).show()
+                            })
+                        } catch (_: Exception) {
+                            Toast.makeText(context, "Speech-to-Text not supported", Toast.LENGTH_SHORT).show()
                         }
                     },
                     modifier = Modifier.testTag("lyrics_dictate_mic")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = "Dictate lyrics by voice",
-                        tint = HighContrastGray
-                    )
-                }
+                ) { Icon(Icons.Default.Mic, contentDescription = "Dictate lyrics", tint = HighContrastGray) }
             },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(180.dp)
-                .testTag("add_naat_lyrics"),
+            modifier = Modifier.fillMaxWidth().height(180.dp).testTag("add_naat_lyrics"),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
         )
+    }
+}
 
-        Spacer(modifier = Modifier.height(20.dp))
+@Composable
+private fun EditorAudioSection(viewModel: NaatViewModel) {
+    val context = LocalContext.current
+    val attachments by viewModel.editorAttachments.collectAsStateWithLifecycle()
+    val activeRecordingFile by viewModel.activeRecordingFile.collectAsStateWithLifecycle()
+    val isAttaching by viewModel.isAttachingFile.collectAsStateWithLifecycle()
 
-        // Dual-Audio Attachment Box View
-        Text(
-            text = "Dual-Audio Attachments",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
+    val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null && !isAttaching) {
+            viewModel.attachLocalFile(uri) { success ->
+                Toast.makeText(
+                    context,
+                    if (success) "Audio file attached successfully!" else "Failed to copy audio attachment",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
 
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Dual-Audio Attachments", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Card(
-            modifier = Modifier
-                .fillMaxWidth()
+            modifier = Modifier.fillMaxWidth()
                 .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
-            ),
-            shape = RoundedCornerShape(8.dp)
+            )
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                // Current attachment (edit mode only): kept as-is unless removed or replaced
-                val currentEditing = editingNaat
-                if (currentEditing != null && currentEditing.audioType != "none" &&
-                    activeRecordingFile == null && linkedFileUriStr == null && !existingAudioRemoved
-                ) {
-                    currentEditing.audioPath?.let { attachmentPath ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Current attachment",
-                                    color = HighContrastGray,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = if (currentEditing.audioType == "recorded") Icons.Default.Mic else Icons.Default.MusicNote,
-                                        contentDescription = null,
-                                        tint = HighContrastGray,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = if (currentEditing.audioType == "recorded") "Voice note" else "Linked audio file",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                            }
-                            AudioAttachmentPreview(path = attachmentPath, viewModel = viewModel)
-                            IconButton(
-                                onClick = { existingAudioRemoved = true },
-                                modifier = Modifier.testTag("remove_current_attachment")
-                            ) {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = "Remove attachment",
-                                    tint = HighContrastRed,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
-                }
-
-                // Feature 1: In-App Voice Recorder controls
-                Text(
-                    text = "Feature 1: In-App Voice Recorder",
-                    fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                when (recordingState) {
-                    // --- Live capture: Pause/Resume + Finish, plus timer & VU meter ---
-                    RecordingState.RECORDING, RecordingState.PAUSED -> {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            if (recordingState == RecordingState.RECORDING) {
-                                Button(
-                                    onClick = { viewModel.pauseRecording() },
-                                    colors = ButtonDefaults.buttonColors(containerColor = HighContrastGray),
-                                    modifier = Modifier.testTag("pause_recording_btn")
-                                ) {
-                                    Text("Pause")
-                                }
-                            } else {
-                                Button(
-                                    onClick = { viewModel.resumeRecording() },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.onBackground),
-                                    modifier = Modifier.testTag("resume_recording_btn")
-                                ) {
-                                    Text("Resume")
-                                }
-                            }
-                            Button(
-                                onClick = { viewModel.stopRecording() },
-                                colors = ButtonDefaults.buttonColors(containerColor = HighContrastRed),
-                                modifier = Modifier.testTag("stop_recording_btn")
-                            ) {
-                                Text("Finish")
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (recordingState == RecordingState.RECORDING) Icons.Default.FiberManualRecord else Icons.Default.Pause,
-                                contentDescription = if (recordingState == RecordingState.RECORDING) "Recording in progress" else "Recording paused",
-                                tint = if (recordingState == RecordingState.RECORDING) HighContrastRed else HighContrastGray,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = formatTime(recordingElapsedMs.toInt()),
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onBackground,
-                                modifier = Modifier.testTag("recording_timer")
-                            )
-                            RecordingVuMeter(amplitude = recordingAmplitude)
-                        }
-                    }
-                    // --- Idle: start a take, or preview/discard/re-record the finished one ---
-                    RecordingState.IDLE -> {
-                        val finishedTake = activeRecordingFile
-                        if (finishedTake == null) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Button(
-                                    onClick = {
-                                        permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.onBackground
-                                    ),
-                                    modifier = Modifier.testTag("start_recording_btn")
-                                ) {
-                                    Icon(Icons.Default.Mic, contentDescription = "Record")
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Tap to Record")
-                                }
-                                Text(
-                                    text = "No Recording",
-                                    color = HighContrastGray,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        } else {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = "Recording ready",
-                                    tint = MaterialTheme.colorScheme.onBackground,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Recording ready: ${finishedTake.name}",
-                                    color = HighContrastGray,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                AudioAttachmentPreview(
-                                    path = finishedTake.absolutePath,
-                                    viewModel = viewModel
-                                )
-                                TextButton(
-                                    onClick = { viewModel.discardRecording() },
-                                    modifier = Modifier.testTag("discard_recording_btn")
-                                ) {
-                                    Icon(
-                                        Icons.Default.Delete,
-                                        contentDescription = "Discard recording",
-                                        tint = HighContrastRed,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Discard", color = HighContrastRed)
-                                }
-                                // Icon-only: a text label wrapped badly in this tight row
-                                IconButton(
-                                    onClick = { viewModel.startRecording() },
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .testTag("rerecord_btn")
-                                ) {
-                                    Icon(
-                                        Icons.Default.Refresh,
-                                        contentDescription = "Re-record",
-                                        tint = MaterialTheme.colorScheme.onBackground
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Feature 2: Local File Attachment Linker
-                Text(
-                    text = "Feature 2: Link External MP3 / M4A File",
-                    fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ExistingAttachments(attachments, activeRecordingFile != null, viewModel)
+                Text("In-App Voice Recorder", fontWeight = FontWeight.SemiBold)
+                RecorderControls(viewModel)
+                HorizontalDivider()
+                Text("Link External MP3 / M4A File", fontWeight = FontWeight.SemiBold)
                 Button(
-                    onClick = { audioPickerLauncher.launch("audio/*") },
-                    enabled = !isAttachingFile,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.onBackground
-                    ),
+                    onClick = { audioPicker.launch("audio/*") },
+                    enabled = !isAttaching,
                     modifier = Modifier.testTag("link_external_file_btn")
                 ) {
-                    if (isAttachingFile) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.background
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
+                    if (isAttaching) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(6.dp))
                         Text("Attaching...")
                     } else {
-                        Icon(Icons.Default.MusicNote, contentDescription = "Link File")
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(Icons.Default.MusicNote, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
                         Text("Browse Local Storage")
                     }
                 }
-
-                if (!linkedFileName.isNullOrEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                attachments.newAttachmentPath?.let { path ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = linkedFileName ?: "",
+                            attachments.newAttachmentName ?: path.substringAfterLast('/'),
                             color = HighContrastGray,
                             style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        AudioAttachmentPreview(path, viewModel)
                         IconButton(onClick = {
-                            // Also delete the copied file from app storage (no orphans)
-                            linkedFileUriStr?.let { viewModel.deleteOrphanFile(it) }
-                            linkedFileUriStr = null
-                            linkedFileName = null
+                            viewModel.deleteOrphanFile(path)
+                            viewModel.updateDraft {
+                                it.copy(newAttachmentPath = null, newAttachmentName = null)
+                            }
                         }) {
-                            Icon(Icons.Default.Delete, contentDescription = "Remove attached file", tint = HighContrastRed)
+                            Icon(Icons.Default.Delete, contentDescription = "Remove linked file", tint = HighContrastRed)
                         }
                     }
                 }
             }
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // Save Notebook Entry Button
-        Button(
-            onClick = {
-                if (title.isBlank()) {
-                    Toast.makeText(context, "Please enter a valid notebook title", Toast.LENGTH_SHORT).show()
-                } else {
-                    // Resolve audio values: a new take or link wins; otherwise the
-                    // existing attachment is kept (unless explicitly removed).
-                    var audioType = "none"
-                    var audioPath: String? = null
-                    val editing = editingNaat
-
-                    if (activeRecordingFile != null) {
-                        audioType = "recorded"
-                        audioPath = activeRecordingFile?.absolutePath
-                    } else if (linkedFileUriStr != null) {
-                        audioType = "local_file"
-                        audioPath = linkedFileUriStr
-                    } else if (editing != null && !existingAudioRemoved && editing.audioType != "none") {
-                        audioType = editing.audioType
-                        audioPath = editing.audioPath
+@Composable
+private fun ExistingAttachments(
+    draft: EditorAttachmentDraft,
+    recordingReplaced: Boolean,
+    viewModel: NaatViewModel
+) {
+    listOf(
+        Triple(draft.existingAudioType, draft.existingAudioPath, false),
+        Triple(draft.existingSecondaryAudioType, draft.existingSecondaryAudioPath, true)
+    ).forEach { (type, path, secondary) ->
+        val removed = if (secondary) draft.existingSecondaryAudioRemoved else draft.existingAudioRemoved
+        val replaced = (type == "recorded" && recordingReplaced) ||
+            (type == "local_file" && draft.newAttachmentPath != null)
+        if (type != "none" && path != null && !removed && !replaced) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (type == "recorded") Icons.Default.Mic else Icons.Default.MusicNote,
+                    contentDescription = null,
+                    tint = HighContrastGray
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    if (type == "recorded") "Current voice note" else "Current linked audio",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                AudioAttachmentPreview(path, viewModel)
+                IconButton(onClick = {
+                    viewModel.updateDraft {
+                        if (secondary) it.copy(existingSecondaryAudioRemoved = true)
+                        else it.copy(existingAudioRemoved = true)
                     }
-
-                    if (editing != null) {
-                        viewModel.updateNaat(
-                            id = editing.id,
-                            title = title,
-                            poet = poet,
-                            category = selectedCategory,
-                            lyrics = lyrics,
-                            audioType = audioType,
-                            audioPath = audioPath,
-                            isFavorite = editing.isFavorite,
-                            createdAt = editing.createdAt,
-                            previousAudioPath = editing.audioPath
-                        )
-                        Toast.makeText(context, "Entry Updated!", Toast.LENGTH_SHORT).show()
-                    } else {
-                        viewModel.addNaat(
-                            title = title,
-                            poet = poet,
-                            category = selectedCategory,
-                            lyrics = lyrics,
-                            audioType = audioType,
-                            audioPath = audioPath
-                        )
-                        Toast.makeText(context, "Notebook Entry Saved!", Toast.LENGTH_SHORT).show()
-                    }
+                }) {
+                    Icon(Icons.Default.Delete, contentDescription = "Remove attachment", tint = HighContrastRed)
                 }
-            },
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-                .testTag("save_notebook_btn"),
-            shape = RoundedCornerShape(8.dp)
-        ) {
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecorderControls(viewModel: NaatViewModel) {
+    val context = LocalContext.current
+    val state by viewModel.recordingState.collectAsStateWithLifecycle()
+    val activeFile by viewModel.activeRecordingFile.collectAsStateWithLifecycle()
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) viewModel.startRecording()
+        else Toast.makeText(context, "Microphone permission is required", Toast.LENGTH_LONG).show()
+    }
+
+    when (state) {
+        RecordingState.RECORDING, RecordingState.PAUSED -> {
+            val elapsed by viewModel.recordingElapsedMs.collectAsStateWithLifecycle()
+            val amplitude by viewModel.recordingAmplitude.collectAsStateWithLifecycle()
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        if (state == RecordingState.RECORDING) viewModel.pauseRecording()
+                        else viewModel.resumeRecording()
+                    },
+                    modifier = Modifier.testTag(
+                        if (state == RecordingState.RECORDING) "pause_recording_btn" else "resume_recording_btn"
+                    )
+                ) { Text(if (state == RecordingState.RECORDING) "Pause" else "Resume") }
+                Button(
+                    onClick = viewModel::stopRecording,
+                    colors = ButtonDefaults.buttonColors(containerColor = HighContrastRed),
+                    modifier = Modifier.testTag("stop_recording_btn")
+                ) { Text("Finish") }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(
+                    if (state == RecordingState.RECORDING) Icons.Default.FiberManualRecord else Icons.Default.Pause,
+                    contentDescription = null,
+                    tint = if (state == RecordingState.RECORDING) HighContrastRed else HighContrastGray,
+                    modifier = Modifier.size(14.dp)
+                )
+                Text(formatTime(elapsed.toInt()), fontWeight = FontWeight.Bold,
+                    modifier = Modifier.testTag("recording_timer"))
+                RecordingVuMeter(amplitude)
+            }
+        }
+        RecordingState.IDLE -> {
+            val finishedFile = activeFile
+            if (finishedFile == null) {
+                Button(
+                    onClick = { permission.launch(android.Manifest.permission.RECORD_AUDIO) },
+                    modifier = Modifier.testTag("start_recording_btn")
+                ) {
+                    Icon(Icons.Default.Mic, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Tap to Record")
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        "Recording ready: ${finishedFile.name}",
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AudioAttachmentPreview(finishedFile.absolutePath, viewModel)
+                    TextButton(
+                        onClick = viewModel::discardRecording,
+                        modifier = Modifier.testTag("discard_recording_btn")
+                    ) { Text("Discard", color = HighContrastRed) }
+                    IconButton(
+                        onClick = viewModel::startRecording,
+                        modifier = Modifier.testTag("rerecord_btn")
+                    ) { Icon(Icons.Default.Refresh, contentDescription = "Re-record") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditorSaveSection(viewModel: NaatViewModel) {
+    val metadata by viewModel.editorMetadata.collectAsStateWithLifecycle()
+    val isSaving by viewModel.isSaving.collectAsStateWithLifecycle()
+    val isAttaching by viewModel.isAttachingFile.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    Button(
+        onClick = {
+            if (metadata.title.isBlank()) {
+                Toast.makeText(context, "Please enter a valid notebook title", Toast.LENGTH_SHORT).show()
+            } else viewModel.saveDraft()
+        },
+        enabled = !isSaving && !isAttaching,
+        modifier = Modifier.fillMaxWidth().height(48.dp).testTag("save_notebook_btn")
+    ) {
+        if (isSaving) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(8.dp))
+            Text("Saving…", fontWeight = FontWeight.Bold)
+        } else {
             Text(
-                text = if (editingNaat != null) "Save Changes" else "Save Entry",
+                if (metadata.editingId != null) "Save Changes" else "Save Entry",
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp
             )
         }
-
-        Spacer(modifier = Modifier.height(24.dp))
     }
 }
-
-// --- Tab C: App Settings Screen ---
