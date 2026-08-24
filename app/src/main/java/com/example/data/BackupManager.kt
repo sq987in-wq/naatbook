@@ -111,6 +111,7 @@ class BackupManager @Inject constructor(
                     )
                     put("isFavorite", naat.isFavorite)
                     put("createdAt", naat.createdAt)
+                    put("updatedAt", naat.updatedAt)
                 })
             }
             val root = JSONObject().apply {
@@ -308,6 +309,9 @@ class BackupManager @Inject constructor(
                 val secondary = if (staged.formatVersion == FORMAT_VERSION) {
                     planAudio(obj.nullableString("secondaryAudioPath"), index + 1)
                 } else null
+                val createdAt = obj.optLong("createdAt", System.currentTimeMillis())
+                // v2 backups predate updatedAt; creation time is their truthful fallback.
+                val updatedAt = obj.optLong("updatedAt", createdAt)
                 add(NaatEntity(
                     title = title,
                     poet = obj.nullableString("poet"),
@@ -316,7 +320,8 @@ class BackupManager @Inject constructor(
                     audioType = if (primary == null) "none" else obj.optString("audioType", "none"),
                     audioPath = primary?.destination?.absolutePath,
                     isFavorite = obj.optBoolean("isFavorite", false),
-                    createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                    createdAt = createdAt,
+                    updatedAt = updatedAt,
                     secondaryAudioType = if (secondary == null) "none"
                         else obj.optString("secondaryAudioType", "none"),
                     secondaryAudioPath = secondary?.destination?.absolutePath

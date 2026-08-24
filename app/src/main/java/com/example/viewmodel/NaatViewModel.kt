@@ -256,6 +256,10 @@ class NaatViewModel @Inject constructor(
     val allSummaries: StateFlow<List<NaatSummary>> = repository.allSummaries
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** Room-backed strict LIMIT 10 feed, ordered by newest create/edit timestamp. */
+    val recentSummaries: StateFlow<List<NaatSummary>> = repository.recentSummaries
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val categoryCounts: StateFlow<Map<String, Int>> = repository.categoryCounts
         .map { rows -> rows.associate { NaatCategories.normalize(it.category) to it.count } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
@@ -834,6 +838,7 @@ class NaatViewModel @Inject constructor(
                         "none"
                     }
                     val secondaryAudioPath = if (secondaryAudioType == "local_file") linkedPath else null
+                    val persistedAt = System.currentTimeMillis()
 
                     val saved = if (draft.editingId == null) {
                         val entity = NaatEntity(
@@ -844,6 +849,8 @@ class NaatViewModel @Inject constructor(
                             audioType = audioType,
                             audioPath = audioPath,
                             isFavorite = false,
+                            createdAt = persistedAt,
+                            updatedAt = persistedAt,
                             secondaryAudioType = secondaryAudioType,
                             secondaryAudioPath = secondaryAudioPath
                         )
@@ -860,6 +867,7 @@ class NaatViewModel @Inject constructor(
                             audioPath = audioPath,
                             isFavorite = draft.existingFavorite,
                             createdAt = draft.existingCreatedAt,
+                            updatedAt = persistedAt,
                             secondaryAudioType = secondaryAudioType,
                             secondaryAudioPath = secondaryAudioPath
                         )

@@ -24,7 +24,8 @@ data class NowPlaying(
 @Singleton
 class PlaybackController @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val engine: Media3PlaybackEngine
+    private val engine: Media3PlaybackEngine,
+    private val playbackRequests: PlaybackRequestRegistry
 ) {
     private val _nowPlaying = MutableStateFlow<NowPlaying?>(null)
     val nowPlaying: StateFlow<NowPlaying?> = _nowPlaying.asStateFlow()
@@ -83,9 +84,13 @@ class PlaybackController @Inject constructor(
         // existing service alive avoids a stop/start race between consecutive entry requests.
         _previewPath.value = null
         _nowPlaying.value = NowPlaying(naat.id, naat.title, naat.poet, path)
+        val requestToken = playbackRequests.register(
+            PlaybackRequest(path, naat.id, naat.title, naat.poet)
+        )
         try {
-            MediaPlaybackService.playEntry(context, path, naat.id, naat.title, naat.poet)
+            MediaPlaybackService.playEntry(context, requestToken)
         } catch (error: Exception) {
+            playbackRequests.discard(requestToken)
             _nowPlaying.value = null
             engine.stop()
             MediaPlaybackService.stop(context)

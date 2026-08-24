@@ -19,6 +19,7 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class MediaPlaybackService : MediaSessionService() {
     @Inject lateinit var engine: Media3PlaybackEngine
+    @Inject lateinit var playbackRequests: PlaybackRequestRegistry
 
     private var mediaSession: MediaSession? = null
 
@@ -53,28 +54,28 @@ class MediaPlaybackService : MediaSessionService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val result = super.onStartCommand(intent, flags, startId)
         if (intent?.action == ACTION_PLAY_ENTRY) {
-            val path = intent.getStringExtra(EXTRA_PATH)
-            val mediaId = intent.getStringExtra(EXTRA_MEDIA_ID)
-            val title = intent.getStringExtra(EXTRA_TITLE)
-            if (path != null && mediaId != null && title != null) {
-                try {
-                    // onCreate has already attached MediaSession listeners, so this state change
-                    // always raises the foreground notification and lock-screen controls.
-                    engine.play(
-                        audioPath = path,
-                        mediaId = mediaId,
-                        title = title,
-                        artist = intent.getStringExtra(EXTRA_ARTIST),
-                        notifyPreviousOwner = false
-                    )
-                    triggerNotificationUpdate()
-                } catch (error: Exception) {
-                    Log.e(TAG, "Unable to start service-owned playback", error)
-                    engine.stop()
-                    stopSelfResult(startId)
-                }
-            } else {
-                Log.e(TAG, "Rejected incomplete playback request")
+            val request = playbackRequests.consume(intent.getStringExtra(EXTRA_REQUEST_TOKEN))
+            if (request == null) {
+                // The service must stay exported for Media3 discovery, but raw paths
+                // never cross that boundary. An external explicit intent has no valid
+                // one-time in-process token and cannot start playback or stop a session.
+                Log.w(TAG, "Rejected unauthorized playback request")
+                return result
+            }
+            try {
+                // onCreate has already attached MediaSession listeners, so this state change
+                // always raises the foreground notification and lock-screen controls.
+                engine.play(
+                    audioPath = request.path,
+                    mediaId = "naat:${request.naatId}",
+                    title = request.title,
+                    artist = request.artist,
+                    notifyPreviousOwner = false
+                )
+                triggerNotificationUpdate()
+            } catch (error: Exception) {
+                Log.e(TAG, "Unable to start service-owned playback", error)
+                engine.stop()
                 stopSelfResult(startId)
             }
         }
@@ -96,6 +97,11 @@ class MediaPlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        // A normal controller stop already idles the singleton before the delayed
+        // service shutdown. If Android destroys the service unexpectedly while the
+        // player is still active, force it idle so no unowned player/wake resource
+        // can outlive the MediaSessionService.
+        if (!engine.isIdle()) engine.ensureIdle()
         clearListener()
         mediaSession?.let { session ->
             if (isSessionAdded(session)) removeSession(session)
@@ -121,24 +127,12 @@ class MediaPlaybackService : MediaSessionService() {
         private const val CHANNEL_ID = "naatbook_playback"
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_PLAY_ENTRY = "com.example.audio.PLAY_ENTRY"
-        private const val EXTRA_PATH = "path"
-        private const val EXTRA_MEDIA_ID = "mediaId"
-        private const val EXTRA_TITLE = "title"
-        private const val EXTRA_ARTIST = "artist"
+        private const val EXTRA_REQUEST_TOKEN = "requestToken"
 
-        fun playEntry(
-            context: Context,
-            path: String,
-            naatId: Int,
-            title: String,
-            artist: String?
-        ) {
+        fun playEntry(context: Context, requestToken: String) {
             val intent = Intent(context, MediaPlaybackService::class.java).apply {
                 action = ACTION_PLAY_ENTRY
-                putExtra(EXTRA_PATH, path)
-                putExtra(EXTRA_MEDIA_ID, "naat:$naatId")
-                putExtra(EXTRA_TITLE, title)
-                putExtra(EXTRA_ARTIST, artist)
+                putExtra(EXTRA_REQUEST_TOKEN, requestToken)
             }
             try {
                 ContextCompat.startForegroundService(context, intent)

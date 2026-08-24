@@ -5,7 +5,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [NaatEntity::class], version = 3, exportSchema = true)
+@Database(entities = [NaatEntity::class], version = 4, exportSchema = true)
 abstract class NaatDatabase : RoomDatabase() {
 
     abstract fun naatDao(): NaatDao
@@ -39,6 +39,17 @@ abstract class NaatDatabase : RoomDatabase() {
                     "ALTER TABLE naats ADD COLUMN secondaryAudioType TEXT NOT NULL DEFAULT 'none'"
                 )
                 db.execSQL("ALTER TABLE naats ADD COLUMN secondaryAudioPath TEXT")
+            }
+        }
+
+        /** v3 -> v4: stable modification time for a Room-backed Recent Notebooks list. */
+        internal val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE naats ADD COLUMN updatedAt INTEGER NOT NULL DEFAULT 0")
+                // Existing entries have no historical edit timestamp; creation time is the
+                // only truthful initial ordering until their next saved edit.
+                db.execSQL("UPDATE naats SET updatedAt = createdAt WHERE updatedAt = 0")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_naats_updatedAt ON naats(updatedAt)")
             }
         }
     }

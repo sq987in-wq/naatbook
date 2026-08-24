@@ -72,7 +72,7 @@ fun LibraryScreen(
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val selectedFolder by viewModel.selectedFolder.collectAsStateWithLifecycle()
     val filteredNaats by viewModel.filteredSummaries.collectAsStateWithLifecycle()
-    val allNaatsList by viewModel.allSummaries.collectAsStateWithLifecycle()
+    val recentNaats by viewModel.recentSummaries.collectAsStateWithLifecycle()
     val categoryCounts by viewModel.categoryCounts.collectAsStateWithLifecycle()
     val favoritesOnly by viewModel.showFavoritesOnly.collectAsStateWithLifecycle()
     val isDeleting by viewModel.isDeleting.collectAsStateWithLifecycle()
@@ -271,9 +271,8 @@ fun LibraryScreen(
                     }
                 }
 
-                // Recent entries list representing "Recent Notebooks" in the mockup HTML
-                val recentNaats = allNaatsList.take(3)
-
+                // Room already applies updatedAt DESC and strict LIMIT 10. The UI never
+                // materializes all summaries merely to render this bounded section.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

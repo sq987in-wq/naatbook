@@ -8,6 +8,7 @@ import javax.inject.Singleton
 class NaatRepository @Inject constructor(private val naatDao: NaatDao) {
     val allNaats: Flow<List<NaatEntity>> = naatDao.getAllNaats()
     val allSummaries: Flow<List<NaatSummary>> = naatDao.getAllSummaries()
+    val recentSummaries: Flow<List<NaatSummary>> = naatDao.getRecentSummaries()
     val categoryCounts: Flow<List<CategoryCount>> = naatDao.getCategoryCounts()
 
     fun filteredSummaries(

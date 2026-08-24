@@ -32,11 +32,15 @@ class NaatDatabaseMigrationTest {
     }
 
     @Test
-    fun `migration 1 through 3 preserves rows normalizes categories and adds dual audio`() {
+    fun `migration 1 through 4 preserves rows normalizes categories and timestamps edits`() {
         createVersionOneDatabase()
 
         database = Room.databaseBuilder(context, NaatDatabase::class.java, TEST_DATABASE)
-            .addMigrations(NaatDatabase.MIGRATION_1_2, NaatDatabase.MIGRATION_2_3)
+            .addMigrations(
+                NaatDatabase.MIGRATION_1_2,
+                NaatDatabase.MIGRATION_2_3,
+                NaatDatabase.MIGRATION_3_4
+            )
             .allowMainThreadQueries()
             .build()
 
@@ -51,6 +55,9 @@ class NaatDatabaseMigrationTest {
 
         assertEquals(0, database!!.openHelper.writableDatabase
             .query("SELECT COUNT(*) FROM naats WHERE secondaryAudioType != 'none' OR secondaryAudioPath IS NOT NULL")
+            .use { cursor -> cursor.moveToFirst(); cursor.getInt(0) })
+        assertEquals(0, database!!.openHelper.writableDatabase
+            .query("SELECT COUNT(*) FROM naats WHERE updatedAt != createdAt")
             .use { cursor -> cursor.moveToFirst(); cursor.getInt(0) })
 
         assertEquals(

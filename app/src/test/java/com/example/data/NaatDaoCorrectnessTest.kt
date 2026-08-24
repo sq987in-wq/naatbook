@@ -44,6 +44,32 @@ class NaatDaoCorrectnessTest {
     }
 
     @Test
+    fun `recent query is Room bounded to ten and ordered by latest edit`() = runBlocking {
+        val dao = database.naatDao()
+        repeat(12) { index ->
+            dao.insertNaat(
+                NaatEntity(
+                    title = "Recent $index",
+                    poet = null,
+                    category = NaatCategories.NAAT,
+                    lyrics = null,
+                    audioType = "none",
+                    audioPath = null,
+                    isFavorite = false,
+                    createdAt = 1L,
+                    updatedAt = index.toLong()
+                )
+            )
+        }
+
+        val recent = dao.getRecentSummaries().first()
+
+        assertTrue(recent.size == 10)
+        assertTrue(recent.first().title == "Recent 11")
+        assertTrue(recent.last().title == "Recent 2")
+    }
+
+    @Test
     fun `favorite toggle uses current database value on every rapid call`() = runBlocking {
         val dao = database.naatDao()
         val id = dao.insertNaat(

@@ -97,6 +97,7 @@ class BackupAtomicityTest {
         val dual = entry("Dual")
             .put("audioType", "recorded").put("audioPath", voicePath)
             .put("secondaryAudioType", "local_file").put("secondaryAudioPath", linkedPath)
+            .put("updatedAt", 456L)
         val archive = archive(
             JSONObject().put("formatVersion", 2).put("entries", JSONArray().put(dual)),
             mapOf(voicePath to voice, linkedPath to linked)
@@ -106,6 +107,7 @@ class BackupAtomicityTest {
         val restored = repository.allNaats.first().single()
         assertEquals("recorded", restored.audioType)
         assertEquals("local_file", restored.secondaryAudioType)
+        assertEquals(456L, restored.updatedAt)
         assertTrue(File(restored.audioPath!!).isFile)
         assertTrue(File(restored.secondaryAudioPath!!).isFile)
     }

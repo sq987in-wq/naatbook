@@ -15,6 +15,16 @@ interface NaatDao {
     """)
     fun getAllSummaries(): Flow<List<NaatSummary>>
 
+    /** Strict bounded recent feed; edits rise to the top without loading all summaries. */
+    @Query("""
+        SELECT id, title, poet, category, audioType, audioPath, isFavorite, createdAt,
+               secondaryAudioType, secondaryAudioPath
+        FROM naats
+        ORDER BY updatedAt DESC
+        LIMIT 10
+    """)
+    fun getRecentSummaries(): Flow<List<NaatSummary>>
+
     @Query("SELECT category, COUNT(*) AS count FROM naats GROUP BY category")
     fun getCategoryCounts(): Flow<List<CategoryCount>>
 

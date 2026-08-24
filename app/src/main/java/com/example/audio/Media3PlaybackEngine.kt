@@ -30,7 +30,15 @@ import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** Process-wide Media3 player shared by in-app previews and the MediaSessionService. */
+/**
+ * Process-lifetime Media3 player shared by in-app previews and MediaSessionService.
+ *
+ * The player is intentionally not released between sessions: releasing it would make
+ * the injected singleton unusable for the next preview/service handoff. Every normal
+ * terminal path must instead call [ensureIdle], which stops playback, clears media
+ * items, cancels progress work, resets exposed state, and releases Media3-managed
+ * focus/wake resources. [release] is reserved for a true process-terminal path.
+ */
 @androidx.annotation.OptIn(UnstableApi::class)
 @Singleton
 class Media3PlaybackEngine @Inject constructor(
@@ -143,7 +151,15 @@ class Media3PlaybackEngine @Inject constructor(
 
     fun hasActiveSession(): Boolean = !released && player.mediaItemCount > 0
 
-    fun stop() = clear(notifyOwner = true)
+    fun stop() = ensureIdle()
+
+    /** Idempotently return the process singleton to a resource-safe idle state. */
+    fun ensureIdle() {
+        if (!released) clear(notifyOwner = true)
+    }
+
+    internal fun isIdle(): Boolean =
+        released || (player.mediaItemCount == 0 && progressJob?.isActive != true && !_isPlaying.value)
 
     private fun clear(notifyOwner: Boolean) {
         playbackGeneration++ // invalidate every terminal callback queued for the old item
@@ -181,7 +197,7 @@ class Media3PlaybackEngine @Inject constructor(
 
     fun release() {
         if (released) return
-        clear(notifyOwner = true)
+        ensureIdle()
         try {
             player.release()
         } finally {
