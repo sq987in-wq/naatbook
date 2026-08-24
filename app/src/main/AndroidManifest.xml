@@ -6,6 +6,7 @@
     <!-- Lock-screen / background media playback service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Media-session notifications are exempt from this runtime grant on 33+,
          but declaring it keeps the notification channel fully authorized. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

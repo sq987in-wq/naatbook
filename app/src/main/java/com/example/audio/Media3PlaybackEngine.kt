@@ -12,6 +12,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -30,6 +31,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /** Process-wide Media3 player shared by in-app previews and the MediaSessionService. */
+@androidx.annotation.OptIn(UnstableApi::class)
 @Singleton
 class Media3PlaybackEngine @Inject constructor(
     @ApplicationContext context: Context
@@ -43,6 +45,7 @@ class Media3PlaybackEngine @Inject constructor(
             true // Media3 owns audio-focus request, duck/pause, and resume behavior.
         )
         setHandleAudioBecomingNoisy(true) // Pause when wired/Bluetooth output disconnects.
+        setWakeMode(C.WAKE_MODE_LOCAL)
     }
 
     internal var onSessionStopped: (() -> Unit)? = null

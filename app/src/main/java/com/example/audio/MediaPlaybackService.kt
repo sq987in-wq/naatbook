@@ -4,14 +4,20 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import android.os.Handler
+import android.os.Looper
 import androidx.core.content.ContextCompat
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import com.example.R
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
 /** Media3 session/notification owner for service-owned entry playback. */
+@androidx.annotation.OptIn(UnstableApi::class)
 @AndroidEntryPoint
 class MediaPlaybackService : MediaSessionService() {
     @Inject lateinit var engine: Media3PlaybackEngine
@@ -20,9 +26,30 @@ class MediaPlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        mediaSession = MediaSession.Builder(this, engine.player)
+        val session = MediaSession.Builder(this, engine.player)
             .setSessionActivity(launchIntent())
             .build()
+        mediaSession = session
+
+        // This app starts playback with an explicit service command rather than binding an
+        // in-process MediaController. onGetSession() is therefore not called automatically.
+        // Explicit registration is required for MediaSessionService to observe the player,
+        // publish its notification, and promote itself to a foreground service.
+        val notificationProvider = DefaultMediaNotificationProvider.Builder(this)
+            .setNotificationId(NOTIFICATION_ID)
+            .setChannelId(CHANNEL_ID)
+            .setChannelName(R.string.app_name)
+            .build()
+            .apply { setSmallIcon(R.drawable.ic_stat_naatbook) }
+        setMediaNotificationProvider(notificationProvider)
+        addSession(session)
+        setListener(object : MediaSessionService.Listener {
+            override fun onForegroundServiceStartNotAllowedException() {
+                Log.e(TAG, "System rejected media foreground-service promotion")
+                engine.stop()
+                stopSelf()
+            }
+        })
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -42,6 +69,7 @@ class MediaPlaybackService : MediaSessionService() {
                         artist = intent.getStringExtra(EXTRA_ARTIST),
                         notifyPreviousOwner = false
                     )
+                    triggerNotificationUpdate()
                 } catch (error: Exception) {
                     Log.e(TAG, "Unable to start service-owned playback", error)
                     engine.stop()
@@ -58,16 +86,23 @@ class MediaPlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // Active or paused entry sessions remain available through the media notification.
         val player = mediaSession?.player
-        if (player == null || player.mediaItemCount == 0 || player.playbackState == Player.STATE_ENDED) {
-            stopSelf()
+        if (player != null && isPlaybackOngoing() && player.playWhenReady &&
+            player.mediaItemCount > 0 && player.playbackState != Player.STATE_ENDED
+        ) {
+            // Deliberately do not call super: its fallback stops non-registered/non-foreground
+            // sessions. A registered ongoing session must survive removal from recents.
+            return
         }
-        super.onTaskRemoved(rootIntent)
+        pauseAllPlayersAndStopSelf()
     }
 
     override fun onDestroy() {
-        mediaSession?.release()
+        clearListener()
+        mediaSession?.let { session ->
+            if (isSessionAdded(session)) removeSession(session)
+            session.release()
+        }
         mediaSession = null
         super.onDestroy()
     }
@@ -85,6 +120,8 @@ class MediaPlaybackService : MediaSessionService() {
 
     companion object {
         private const val TAG = "Media3Service"
+        private const val CHANNEL_ID = "naatbook_playback"
+        private const val NOTIFICATION_ID = 1001
         private const val ACTION_PLAY_ENTRY = "com.example.audio.PLAY_ENTRY"
         private const val EXTRA_PATH = "path"
         private const val EXTRA_MEDIA_ID = "mediaId"
@@ -114,11 +151,15 @@ class MediaPlaybackService : MediaSessionService() {
         }
 
         fun stop(context: Context) {
-            try {
-                context.stopService(Intent(context, MediaPlaybackService::class.java))
-            } catch (error: Exception) {
-                Log.w(TAG, "MediaSessionService stop failed", error)
-            }
+            // Let MediaSessionService consume the player's empty-timeline events and remove the
+            // foreground notification before releasing its session on service destruction.
+            Handler(Looper.getMainLooper()).postDelayed({
+                try {
+                    context.stopService(Intent(context, MediaPlaybackService::class.java))
+                } catch (error: Exception) {
+                    Log.w(TAG, "MediaSessionService stop failed", error)
+                }
+            }, 250L)
         }
     }
 }
