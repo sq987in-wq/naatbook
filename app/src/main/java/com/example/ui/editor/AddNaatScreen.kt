@@ -94,12 +94,13 @@ fun AddNaatModal(
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // The ModalBottomSheet owns window/status insets and constrains this list's
-    // height. Keeping a single LazyColumn avoids nested scroll jank with the IME.
+    // The non-draggable editor sheet constrains this list's height. Keeping a
+    // single LazyColumn avoids nested scroll jank with the IME.
     LazyColumn(
         modifier = modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.background)
+            .navigationBarsPadding()
             .imePadding(),
         contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)

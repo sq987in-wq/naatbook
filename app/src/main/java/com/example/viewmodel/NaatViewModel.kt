@@ -66,6 +66,33 @@ data class EditorDraft(
     val finishedRecordingPath: String? = null
 )
 
+/** True only when abandoning this draft would lose user-entered or user-attached work. */
+internal fun EditorDraft.hasUnsavedChanges(original: NaatEntity?): Boolean {
+    if (!active) return false
+
+    if (editingId == null) {
+        return title.isNotBlank() ||
+            poet.isNotBlank() ||
+            lyrics.isNotBlank() ||
+            category != NaatCategories.DEFAULT ||
+            newAttachmentPath != null ||
+            finishedRecordingPath != null
+    }
+
+    // If process restoration could not rehydrate the original row, be conservative:
+    // asking before discard is always safer than silently losing a recovered draft.
+    if (original == null || original.id != editingId) return true
+
+    return title != original.title ||
+        poet != original.poet.orEmpty() ||
+        NaatCategories.normalize(category) != NaatCategories.normalize(original.category) ||
+        lyrics != original.lyrics.orEmpty() ||
+        existingAudioRemoved ||
+        existingSecondaryAudioRemoved ||
+        newAttachmentPath != null ||
+        finishedRecordingPath != null
+}
+
 @HiltViewModel
 class NaatViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -377,6 +404,10 @@ class NaatViewModel @Inject constructor(
         // opened only through startAddDraft from the docked FAB.
         if (index == 0 || index == 2) _currentTab.value = index
     }
+
+    /** Used by the editor shell before an explicit X/Back discard request. */
+    fun hasUnsavedEditorChanges(): Boolean =
+        _editorDraft.value.hasUnsavedChanges(_editingNaat.value)
 
     /** Explicit cancellation/discard. Recorder finalization always precedes file cleanup. */
     fun setShowAddModal(show: Boolean) {

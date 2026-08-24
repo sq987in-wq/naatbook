@@ -9,28 +9,23 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -39,7 +34,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.data.NaatEntity
 import com.example.ui.components.GlobalMiniPlayer
 import com.example.ui.components.NaatBottomNavigation
-import com.example.ui.editor.AddNaatModal
+import com.example.ui.editor.NonDismissibleEditorSheet
 import com.example.ui.library.LibraryScreen
 import com.example.ui.reader.LyricsReaderScreen
 import com.example.ui.settings.SettingsScreen
@@ -51,7 +46,6 @@ private object NaatRoutes {
     const val READER = "reader"
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NaatApp(viewModel: NaatViewModel) {
     val context = LocalContext.current
@@ -68,11 +62,13 @@ fun NaatApp(viewModel: NaatViewModel) {
     val isSaving by viewModel.isSaving.collectAsStateWithLifecycle()
     val isAttaching by viewModel.isAttachingFile.collectAsStateWithLifecycle()
 
+    var showDiscardConfirmation by rememberSaveable { mutableStateOf(false) }
     var detailNavigationPending by remember { mutableStateOf(false) }
     LaunchedEffect(currentRoute, showAddModal) {
         // The sheet has no navigation destination. Release the coalescing gate only
         // once either a real detail route or the state-owned editor is visible.
         if (currentRoute != NaatRoutes.HOME || showAddModal) detailNavigationPending = false
+        if (!showAddModal) showDiscardConfirmation = false
     }
 
     val darkThemeEnabled = when (themeMode) {
@@ -131,6 +127,15 @@ fun NaatApp(viewModel: NaatViewModel) {
         // A FAB press always represents a deliberately fresh new entry, never a
         // dormant edit draft. startAddDraft handles recorder/file cleanup off-main.
         viewModel.startAddDraft(forceFresh = true)
+    }
+
+    fun requestEditorClose() {
+        if (isSaving || isAttaching) return
+        if (viewModel.hasUnsavedEditorChanges()) {
+            showDiscardConfirmation = true
+        } else {
+            viewModel.setShowAddModal(false)
+        }
     }
 
     MyApplicationTheme(darkTheme = darkThemeEnabled) {
@@ -212,27 +217,37 @@ fun NaatApp(viewModel: NaatViewModel) {
                 }
 
                 if (showAddModal) {
-                    val canDismissSheet = !isSaving && !isAttaching
-                    val sheetState = rememberModalBottomSheetState(
-                        skipPartiallyExpanded = true,
-                        confirmValueChange = { target ->
-                            target != SheetValue.Hidden || canDismissSheet
+                    NonDismissibleEditorSheet(
+                        viewModel = viewModel,
+                        maxHeight = sheetMaxHeight,
+                        discardConfirmationVisible = showDiscardConfirmation,
+                        onRequestClose = ::requestEditorClose
+                    )
+                }
+
+                if (showDiscardConfirmation) {
+                    AlertDialog(
+                        onDismissRequest = { showDiscardConfirmation = false },
+                        title = { Text("Discard unsaved entry?") },
+                        text = {
+                            Text(
+                                "Your unsaved text and newly recorded or attached audio will be discarded."
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    showDiscardConfirmation = false
+                                    viewModel.setShowAddModal(false)
+                                }
+                            ) { Text("Discard") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showDiscardConfirmation = false }) {
+                                Text("Keep editing")
+                            }
                         }
                     )
-                    ModalBottomSheet(
-                        onDismissRequest = { viewModel.setShowAddModal(false) },
-                        sheetState = sheetState
-                    ) {
-                        AddNaatModal(
-                            viewModel = viewModel,
-                            onClose = { viewModel.setShowAddModal(false) },
-                            modifier = Modifier
-                                .widthIn(max = 640.dp)
-                                .fillMaxWidth()
-                                .heightIn(max = sheetMaxHeight)
-                                .align(Alignment.CenterHorizontally)
-                        )
-                    }
                 }
             }
         }
@@ -243,20 +258,20 @@ fun NaatApp(viewModel: NaatViewModel) {
 private fun AppBackHandler(
     currentRoute: String?,
     currentTab: Int,
-    showAddModal: Boolean,
+    editorModalVisible: Boolean,
     viewModel: NaatViewModel
 ) {
     val selectedFolder by viewModel.selectedFolder.collectAsStateWithLifecycle()
     val favoritesOnly by viewModel.showFavoritesOnly.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
-    BackHandler(
-        enabled = showAddModal || currentRoute == NaatRoutes.READER ||
+    val canHandleAppBack = !editorModalVisible && (
+        currentRoute == NaatRoutes.READER ||
             (currentRoute == NaatRoutes.HOME && currentTab == 2) ||
             (currentRoute == NaatRoutes.HOME && currentTab == 0 &&
                 (selectedFolder != null || favoritesOnly || searchQuery.isNotBlank()))
-    ) {
+    )
+    BackHandler(enabled = canHandleAppBack) {
         when {
-            showAddModal -> viewModel.setShowAddModal(false)
             currentRoute == NaatRoutes.READER -> viewModel.selectNaat(null)
             currentRoute == NaatRoutes.HOME && currentTab == 2 -> {
                 viewModel.selectTab(0)
