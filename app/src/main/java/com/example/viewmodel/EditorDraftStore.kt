@@ -13,7 +13,9 @@ internal class EditorDraftStore(private val handle: SavedStateHandle) {
         title = handle[TITLE] ?: "",
         poet = handle[POET] ?: "",
         category = handle[CATEGORY] ?: NaatCategories.DEFAULT,
-        lyrics = handle[LYRICS] ?: "",
+        // Lyrics intentionally remain disk-backed. Keeping arbitrary text in the
+        // SavedState Bundle risks TransactionTooLargeException on recreation.
+        lyrics = "",
         existingAudioRemoved = handle[EXISTING_AUDIO_REMOVED] ?: false,
         existingAudioType = handle[EXISTING_AUDIO_TYPE] ?: "none",
         existingAudioPath = handle[EXISTING_AUDIO_PATH],
@@ -33,7 +35,9 @@ internal class EditorDraftStore(private val handle: SavedStateHandle) {
         handle[TITLE] = draft.title
         handle[POET] = draft.poet
         handle[CATEGORY] = draft.category
-        handle[LYRICS] = draft.lyrics
+        // Remove any legacy payload on the next state write; disk snapshots own
+        // lyrics from now on and keep SavedStateHandle lightweight.
+        handle.remove<String>(LYRICS)
         handle[EXISTING_AUDIO_REMOVED] = draft.existingAudioRemoved
         handle[EXISTING_AUDIO_TYPE] = draft.existingAudioType
         handle[EXISTING_AUDIO_PATH] = draft.existingAudioPath

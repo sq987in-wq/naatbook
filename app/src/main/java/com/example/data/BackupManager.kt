@@ -41,7 +41,8 @@ internal fun safeBackupDestination(baseDir: File, entryName: String): File? {
 @Singleton
 class BackupManager @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val repository: NaatRepository
+    private val repository: NaatRepository,
+    private val audioFiles: AudioFileLifecycleCoordinator
 ) {
     private companion object {
         const val FORMAT_VERSION = 2
@@ -88,7 +89,8 @@ class BackupManager @Inject constructor(
      * A hashing/ZIP failure therefore cannot truncate a previously valid backup.
      */
     suspend fun exportBackup(outputUri: Uri): Result<String> = withContext(Dispatchers.IO) {
-        val stagedZip = File(context.cacheDir, "backup-export-${UUID.randomUUID()}.zip")
+        audioFiles.exclusive {
+            val stagedZip = File(context.cacheDir, "backup-export-${UUID.randomUUID()}.zip")
         runCatching {
             val naats = repository.allNaats.first()
             val audioIndex = buildAudioIndex(naats)
@@ -148,8 +150,9 @@ class BackupManager @Inject constructor(
                 }
             }
             "Backup exported successfully"
-        }.onFailure { Log.e("BackupManager", "Export failed", it) }
-            .also { stagedZip.delete() }
+            }.onFailure { Log.e("BackupManager", "Export failed", it) }
+                .also { stagedZip.delete() }
+        }
     }
 
     private fun buildAudioIndex(naats: List<NaatEntity>): ExportAudioIndex {
@@ -200,14 +203,16 @@ class BackupManager @Inject constructor(
      * failure rolls back only files created by this attempt.
      */
     suspend fun importBackup(inputUri: Uri): Result<Int> = withContext(Dispatchers.IO) {
-        val stagingDir = File(context.cacheDir, "backup-import-${UUID.randomUUID()}")
+        audioFiles.exclusive {
+            val stagingDir = File(context.cacheDir, "backup-import-${UUID.randomUUID()}")
         runCatching {
             if (!stagingDir.mkdirs()) throw IOException("Could not create import staging area")
             val staged = extractAndValidateArchive(inputUri, stagingDir)
             val plan = buildRestorePlan(staged)
             commitRestorePlan(plan)
-        }.onFailure { Log.e("BackupManager", "Import failed", it) }
-            .also { stagingDir.deleteRecursively() }
+            }.onFailure { Log.e("BackupManager", "Import failed", it) }
+                .also { stagingDir.deleteRecursively() }
+        }
     }
 
     private fun extractAndValidateArchive(inputUri: Uri, stagingDir: File): StagedArchive {

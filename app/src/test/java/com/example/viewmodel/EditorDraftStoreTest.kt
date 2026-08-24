@@ -3,11 +3,12 @@ package com.example.viewmodel
 import androidx.lifecycle.SavedStateHandle
 import com.example.data.NaatCategories
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class EditorDraftStoreTest {
     @Test
-    fun `all edit and attachment fields survive handle recreation`() {
+    fun `lightweight edit and attachment fields survive without lyrics payload`() {
         val handle = SavedStateHandle()
         val expected = EditorDraft(
             active = true,
@@ -32,7 +33,19 @@ class EditorDraftStoreTest {
         EditorDraftStore(handle).save(expected)
 
         // A newly constructed store models the ViewModel being recreated around retained state.
-        assertEquals(expected, EditorDraftStore(handle).restore())
+        assertEquals(expected.copy(lyrics = ""), EditorDraftStore(handle).restore())
+        assertFalse(handle.contains("draft.lyrics"))
+    }
+
+    @Test
+    fun `large lyrics never enter SavedStateHandle`() {
+        val handle = SavedStateHandle()
+        EditorDraftStore(handle).save(
+            EditorDraft(active = true, lyrics = "x".repeat(512_000))
+        )
+
+        assertFalse(handle.contains("draft.lyrics"))
+        assertEquals("", EditorDraftStore(handle).restore().lyrics)
     }
 
     @Test

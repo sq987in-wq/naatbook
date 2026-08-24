@@ -250,7 +250,7 @@ fun SettingsScreen(viewModel: NaatViewModel) {
 
         Spacer(modifier = Modifier.height(40.dp))
         Text(
-            text = "My Naat Notebook v1.0.0\n100% Offline | Zero Data Tracking",
+            text = "NaatBook v1.0.0\n100% Offline | Zero Data Tracking",
             style = MaterialTheme.typography.bodySmall,
             textAlign = TextAlign.Center,
             color = HighContrastGray,

@@ -20,19 +20,25 @@ class CorrectnessGuardsTest {
         val recording = createTempFile(prefix = "recording", suffix = ".m4a")
         val linked = createTempFile(prefix = "linked", suffix = ".mp3")
 
-        DraftFileCleanup.discard(null, listOf(recording.path, linked.path))
+        DraftFileCleanup.discard(emptyList(), listOf(recording.path, linked.path))
 
         assertFalse(recording.exists())
         assertFalse(linked.exists())
     }
 
     @Test
-    fun `saved existing attachment is never deleted by draft cleanup`() {
-        val saved = createTempFile(prefix = "saved", suffix = ".m4a")
+    fun `saved primary and secondary attachments are never deleted by draft cleanup`() {
+        val primary = createTempFile(prefix = "saved-primary", suffix = ".m4a")
+        val secondary = createTempFile(prefix = "saved-secondary", suffix = ".mp3")
 
-        DraftFileCleanup.discard(saved.path, listOf(saved.path, saved.path))
+        DraftFileCleanup.discard(
+            listOf(primary.path, secondary.path),
+            listOf(primary.path, secondary.path, primary.path)
+        )
 
-        assertTrue(saved.exists())
-        saved.delete()
+        assertTrue(primary.exists())
+        assertTrue(secondary.exists())
+        primary.delete()
+        secondary.delete()
     }
 }

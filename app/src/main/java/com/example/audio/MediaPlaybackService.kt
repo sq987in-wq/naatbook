@@ -4,8 +4,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import android.os.Handler
-import android.os.Looper
 import androidx.core.content.ContextCompat
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -151,15 +149,11 @@ class MediaPlaybackService : MediaSessionService() {
         }
 
         fun stop(context: Context) {
-            // Let MediaSessionService consume the player's empty-timeline events and remove the
-            // foreground notification before releasing its session on service destruction.
-            Handler(Looper.getMainLooper()).postDelayed({
-                try {
-                    context.stopService(Intent(context, MediaPlaybackService::class.java))
-                } catch (error: Exception) {
-                    Log.w(TAG, "MediaSessionService stop failed", error)
-                }
-            }, 250L)
+            try {
+                context.stopService(Intent(context, MediaPlaybackService::class.java))
+            } catch (error: Exception) {
+                Log.w(TAG, "MediaSessionService stop failed", error)
+            }
         }
     }
 }
