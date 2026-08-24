@@ -56,6 +56,7 @@ import com.example.ui.theme.NastaliqFamily
 import com.example.ui.theme.HighContrastRed
 import com.example.ui.theme.HighContrastGray
 import com.example.viewmodel.NaatViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -64,8 +65,8 @@ import java.io.File
 @Composable
 fun SettingsScreen(viewModel: NaatViewModel) {
     val context = LocalContext.current
-    val themeMode by viewModel.themeMode.collectAsState()
-    val globalFontSize by viewModel.globalFontSize.collectAsState()
+    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val globalFontSize by viewModel.globalFontSize.collectAsStateWithLifecycle()
 
     // Create zip launcher
     val exportBackupLauncher = rememberLauncherForActivityResult(

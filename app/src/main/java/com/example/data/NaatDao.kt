@@ -8,6 +8,33 @@ interface NaatDao {
     @Query("SELECT * FROM naats ORDER BY createdAt DESC")
     fun getAllNaats(): Flow<List<NaatEntity>>
 
+    @Query("""
+        SELECT id, title, poet, category, audioType, audioPath, isFavorite, createdAt,
+               secondaryAudioType, secondaryAudioPath
+        FROM naats ORDER BY createdAt DESC
+    """)
+    fun getAllSummaries(): Flow<List<NaatSummary>>
+
+    @Query("SELECT category, COUNT(*) AS count FROM naats GROUP BY category")
+    fun getCategoryCounts(): Flow<List<CategoryCount>>
+
+    @Query("""
+        SELECT id, title, poet, category, audioType, audioPath, isFavorite, createdAt,
+               secondaryAudioType, secondaryAudioPath
+        FROM naats
+        WHERE (:folder IS NULL OR category = :folder COLLATE NOCASE)
+          AND (:favoritesOnly = 0 OR isFavorite = 1)
+          AND (:query = '' OR title LIKE '%' || :query || '%' COLLATE NOCASE
+               OR poet LIKE '%' || :query || '%' COLLATE NOCASE
+               OR lyrics LIKE '%' || :query || '%' COLLATE NOCASE)
+        ORDER BY createdAt DESC
+    """)
+    fun getFilteredSummaries(
+        query: String,
+        folder: String?,
+        favoritesOnly: Boolean
+    ): Flow<List<NaatSummary>>
+
     @Query("SELECT * FROM naats WHERE id = :id")
     suspend fun getNaatById(id: Int): NaatEntity?
 

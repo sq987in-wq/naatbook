@@ -56,6 +56,7 @@ import com.example.ui.theme.NastaliqFamily
 import com.example.ui.theme.HighContrastRed
 import com.example.ui.theme.HighContrastGray
 import com.example.viewmodel.NaatViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -213,9 +214,9 @@ fun GlobalMiniPlayer(
     onOpen: () -> Unit
 ) {
     val controller = viewModel.playbackController
-    val nowPlaying by controller.nowPlaying.collectAsState()
-    val hasSession by controller.hasActiveSession.collectAsState()
-    val isPlaying by controller.isPlaying.collectAsState()
+    val nowPlaying by controller.nowPlaying.collectAsStateWithLifecycle()
+    val hasSession by controller.hasActiveSession.collectAsStateWithLifecycle()
+    val isPlaying by controller.isPlaying.collectAsStateWithLifecycle()
 
     val current = nowPlaying
     if (current == null || !hasSession) return
@@ -327,10 +328,10 @@ fun AudioAttachmentPreview(
     viewModel: NaatViewModel
 ) {
     val controller = viewModel.playbackController
-    val activePreviewPath by controller.previewPath.collectAsState()
-    val playerIsPlaying by controller.isPlaying.collectAsState()
-    val currentPos by controller.currentPosition.collectAsState()
-    val duration by controller.duration.collectAsState()
+    val activePreviewPath by controller.previewPath.collectAsStateWithLifecycle()
+    val playerIsPlaying by controller.isPlaying.collectAsStateWithLifecycle()
+    val currentPos by controller.currentPosition.collectAsStateWithLifecycle()
+    val duration by controller.duration.collectAsStateWithLifecycle()
     val ownsPreview = activePreviewPath == path && controller.ownsPreview(path)
     val isPlaying = ownsPreview && playerIsPlaying
 

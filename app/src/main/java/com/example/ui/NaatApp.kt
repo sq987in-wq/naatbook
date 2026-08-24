@@ -4,13 +4,6 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
@@ -21,11 +14,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -42,36 +38,34 @@ import com.example.ui.theme.MyApplicationTheme
 import com.example.viewmodel.NaatViewModel
 
 private object NaatRoutes {
-    const val LIBRARY = "library"
-    const val SETTINGS = "settings"
+    const val HOME = "home"
     const val READER = "reader"
     const val EDITOR = "editor"
 }
-
-private const val TOP_LEVEL_FADE_MILLIS = 140
 
 @Composable
 fun NaatApp(viewModel: NaatViewModel) {
     val context = LocalContext.current
     val navController = rememberNavController()
+    val tabStateHolder = rememberSaveableStateHolder()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
-    val showAddModal by viewModel.showAddModal.collectAsState()
-    val selectedNaat by viewModel.selectedNaat.collectAsState()
-    val themeMode by viewModel.themeMode.collectAsState()
-    val selectedFolder by viewModel.selectedFolder.collectAsState()
-    val favoritesOnly by viewModel.showFavoritesOnly.collectAsState()
-    val searchQuery by viewModel.searchQuery.collectAsState()
+    val currentTab by viewModel.currentTab.collectAsStateWithLifecycle()
+    val showAddModal by viewModel.showAddModal.collectAsStateWithLifecycle()
+    val selectedNaat by viewModel.selectedNaat.collectAsStateWithLifecycle()
+    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val statusMessage by viewModel.statusMessage.collectAsStateWithLifecycle()
 
-    val isSystemDark = isSystemInDarkTheme()
+    var detailNavigationPending by remember { mutableStateOf(false) }
+    LaunchedEffect(currentRoute) { detailNavigationPending = false }
+
     val darkThemeEnabled = when (themeMode) {
         "white" -> false
         "black" -> true
-        else -> isSystemDark
+        else -> isSystemInDarkTheme()
     }
 
-    val statusMessage by viewModel.statusMessage.collectAsState()
     LaunchedEffect(statusMessage) {
         statusMessage?.let {
             Toast.makeText(context, it, Toast.LENGTH_LONG).show()
@@ -79,60 +73,72 @@ fun NaatApp(viewModel: NaatViewModel) {
         }
     }
 
-    // ViewModel mutations which finish a route asynchronously (save/delete)
-    // also pop the corresponding Navigation-Compose destination.
+    // State is the single authority for asynchronous save/delete/close completion.
     LaunchedEffect(currentRoute, showAddModal) {
-        if (currentRoute == NaatRoutes.EDITOR && !showAddModal) {
-            navController.popBackStack()
-        }
+        if (currentRoute == NaatRoutes.EDITOR && !showAddModal) navController.popBackStack()
     }
     LaunchedEffect(currentRoute, selectedNaat) {
-        if (currentRoute == NaatRoutes.READER && selectedNaat == null) {
-            navController.popBackStack()
-        }
+        if (currentRoute == NaatRoutes.READER && selectedNaat == null) navController.popBackStack()
     }
 
-    BackHandler(
-        enabled = currentRoute == NaatRoutes.EDITOR ||
-            currentRoute == NaatRoutes.READER ||
-            currentRoute == NaatRoutes.SETTINGS ||
-            (currentRoute == NaatRoutes.LIBRARY &&
-                (selectedFolder != null || favoritesOnly || searchQuery.isNotBlank()))
-    ) {
-        when (currentRoute) {
-            NaatRoutes.EDITOR -> closeEditor(viewModel, navController)
-            NaatRoutes.READER -> closeReader(viewModel, navController)
-            NaatRoutes.SETTINGS -> {
-                viewModel.selectTab(0)
-                viewModel.resetLibraryToHome()
-                navController.popBackStack()
-            }
-            NaatRoutes.LIBRARY -> when {
-                selectedFolder != null -> viewModel.selectFolder(null)
-                favoritesOnly -> viewModel.setFavoritesOnly(false)
-                else -> viewModel.setSearchQuery("")
-            }
-        }
+    AppBackHandler(currentRoute, currentTab, viewModel)
+
+
+    fun openReader(id: Int) {
+        if (detailNavigationPending || currentRoute != NaatRoutes.HOME) return
+        detailNavigationPending = true
+        viewModel.loadNaat(
+            id = id,
+            onLoaded = { naat ->
+                viewModel.selectNaat(naat)
+                navController.navigate(NaatRoutes.READER) { launchSingleTop = true }
+            },
+            onFailure = { detailNavigationPending = false }
+        )
+    }
+
+    fun openEditorEntry(naat: NaatEntity) {
+        if (detailNavigationPending || currentRoute == NaatRoutes.EDITOR) return
+        detailNavigationPending = true
+        viewModel.startEditNaat(naat)
+        navController.navigate(NaatRoutes.EDITOR) { launchSingleTop = true }
+    }
+
+    fun openEditorById(id: Int) {
+        if (detailNavigationPending || currentRoute != NaatRoutes.HOME) return
+        detailNavigationPending = true
+        viewModel.loadNaat(
+            id = id,
+            onLoaded = { naat ->
+                viewModel.startEditNaat(naat)
+                navController.navigate(NaatRoutes.EDITOR) { launchSingleTop = true }
+            },
+            onFailure = { detailNavigationPending = false }
+        )
+    }
+
+    fun openAdd() {
+        if (detailNavigationPending || currentRoute != NaatRoutes.HOME) return
+        detailNavigationPending = true
+        viewModel.selectTab(1)
+        navController.navigate(NaatRoutes.EDITOR) { launchSingleTop = true }
     }
 
     MyApplicationTheme(darkTheme = darkThemeEnabled) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background
-        ) {
-            val showBottomBar = currentRoute == null ||
-                currentRoute == NaatRoutes.LIBRARY || currentRoute == NaatRoutes.SETTINGS
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            val atHome = currentRoute == null || currentRoute == NaatRoutes.HOME
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
                 contentColor = MaterialTheme.colorScheme.onBackground,
                 bottomBar = {
-                    if (showBottomBar) {
+                    if (atHome) {
                         Column {
                             GlobalMiniPlayer(
                                 viewModel = viewModel,
                                 onOpen = {
                                     viewModel.openNowPlayingEntry { found ->
-                                        if (found && navController.currentDestination?.route != NaatRoutes.READER) {
+                                        if (found && !detailNavigationPending) {
+                                            detailNavigationPending = true
                                             navController.navigate(NaatRoutes.READER) {
                                                 launchSingleTop = true
                                             }
@@ -141,190 +147,86 @@ fun NaatApp(viewModel: NaatViewModel) {
                                 }
                             )
                             NaatBottomNavigation(
-                                // Navigation is the source of truth for selection;
-                                // this also stays correct after back-stack restore.
-                                currentTab = if (currentRoute == NaatRoutes.SETTINGS) 2 else 0,
+                                currentTab = currentTab,
                                 onTabSelected = { tab ->
-                                    navigateToTab(tab, viewModel, navController)
+                                    when (tab) {
+                                        0, 2 -> if (tab != currentTab) viewModel.selectTab(tab)
+                                        1 -> openAdd()
+                                    }
                                 }
                             )
                         }
                     }
                 }
             ) { innerPadding ->
-                NaatNavHost(
+                NavHost(
                     navController = navController,
-                    viewModel = viewModel,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
-                        // Keep a themed layer behind both destinations throughout
-                        // their crossfade; otherwise a transparent animation frame
-                        // can expose the Activity window (black in light mode).
-                        .background(MaterialTheme.colorScheme.background)
-                )
+                    startDestination = NaatRoutes.HOME,
+                    modifier = Modifier.fillMaxSize().padding(innerPadding)
+                        .background(MaterialTheme.colorScheme.background),
+                    enterTransition = { EnterTransition.None },
+                    exitTransition = { ExitTransition.None },
+                    popEnterTransition = { EnterTransition.None },
+                    popExitTransition = { ExitTransition.None }
+                ) {
+                    composable(NaatRoutes.HOME) {
+                        // Top-level tabs switch in-place: no back-stack transaction, fade, or
+                        // simultaneous full-screen composition.
+                        tabStateHolder.SaveableStateProvider(currentTab) {
+                            when (currentTab) {
+                                2 -> SettingsScreen(viewModel)
+                                else -> LibraryScreen(
+                                    viewModel = viewModel,
+                                    onOpenReader = { id -> openReader(id) },
+                                    onEdit = { id -> openEditorById(id) }
+                                )
+                            }
+                        }
+                    }
+                    composable(NaatRoutes.READER) {
+                        selectedNaat?.let { naat ->
+                            LyricsReaderScreen(
+                                naat = naat,
+                                viewModel = viewModel,
+                                onClose = { viewModel.selectNaat(null) },
+                                onEdit = { entry -> openEditorEntry(entry) }
+                            )
+                        }
+                    }
+                    composable(NaatRoutes.EDITOR) {
+                        AddNaatModal(
+                            viewModel = viewModel,
+                            onClose = { if (!viewModel.isSaving.value) viewModel.setShowAddModal(false) }
+                        )
+                    }
+                }
             }
         }
     }
 }
+
 
 @Composable
-private fun NaatNavHost(
-    navController: NavHostController,
-    viewModel: NaatViewModel,
-    modifier: Modifier = Modifier
-) {
-    NavHost(
-        navController = navController,
-        startDestination = NaatRoutes.LIBRARY,
-        modifier = modifier,
-        enterTransition = { EnterTransition.None },
-        exitTransition = { ExitTransition.None },
-        popEnterTransition = { EnterTransition.None },
-        popExitTransition = { ExitTransition.None }
+private fun AppBackHandler(currentRoute: String?, currentTab: Int, viewModel: NaatViewModel) {
+    val selectedFolder by viewModel.selectedFolder.collectAsStateWithLifecycle()
+    val favoritesOnly by viewModel.showFavoritesOnly.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    BackHandler(
+        enabled = currentRoute == NaatRoutes.EDITOR || currentRoute == NaatRoutes.READER ||
+            (currentRoute == NaatRoutes.HOME && currentTab == 2) ||
+            (currentRoute == NaatRoutes.HOME && currentTab == 0 &&
+                (selectedFolder != null || favoritesOnly || searchQuery.isNotBlank()))
     ) {
-        composable(
-            route = NaatRoutes.LIBRARY,
-            enterTransition = {
-                if (initialState.destination.route == NaatRoutes.SETTINGS) {
-                    fadeIn(tween(TOP_LEVEL_FADE_MILLIS))
-                } else {
-                    EnterTransition.None
-                }
-            },
-            exitTransition = {
-                if (targetState.destination.route == NaatRoutes.SETTINGS) {
-                    fadeOut(tween(TOP_LEVEL_FADE_MILLIS))
-                } else {
-                    ExitTransition.None
-                }
-            },
-            popEnterTransition = {
-                if (initialState.destination.route == NaatRoutes.SETTINGS) {
-                    fadeIn(tween(TOP_LEVEL_FADE_MILLIS))
-                } else {
-                    EnterTransition.None
-                }
+        when {
+            currentRoute == NaatRoutes.EDITOR -> viewModel.setShowAddModal(false)
+            currentRoute == NaatRoutes.READER -> viewModel.selectNaat(null)
+            currentRoute == NaatRoutes.HOME && currentTab == 2 -> {
+                viewModel.selectTab(0)
+                viewModel.resetLibraryToHome()
             }
-        ) {
-            LibraryScreen(
-                viewModel = viewModel,
-                onOpenReader = { naat -> openReader(naat, viewModel, navController) },
-                onEdit = { naat -> openEditor(naat, viewModel, navController) }
-            )
-        }
-        composable(
-            route = NaatRoutes.SETTINGS,
-            enterTransition = {
-                if (initialState.destination.route == NaatRoutes.LIBRARY) {
-                    fadeIn(tween(TOP_LEVEL_FADE_MILLIS))
-                } else {
-                    EnterTransition.None
-                }
-            },
-            exitTransition = {
-                if (targetState.destination.route == NaatRoutes.LIBRARY) {
-                    fadeOut(tween(TOP_LEVEL_FADE_MILLIS))
-                } else {
-                    ExitTransition.None
-                }
-            },
-            popExitTransition = {
-                if (targetState.destination.route == NaatRoutes.LIBRARY) {
-                    fadeOut(tween(TOP_LEVEL_FADE_MILLIS))
-                } else {
-                    ExitTransition.None
-                }
-            }
-        ) {
-            SettingsScreen(viewModel = viewModel)
-        }
-        composable(
-            route = NaatRoutes.READER,
-            enterTransition = { slideInHorizontally(initialOffsetX = { it }) + fadeIn() },
-            popExitTransition = { slideOutHorizontally(targetOffsetX = { it }) + fadeOut() }
-        ) {
-            viewModel.selectedNaat.value?.let { naat ->
-                LyricsReaderScreen(
-                    naat = naat,
-                    viewModel = viewModel,
-                    onClose = { closeReader(viewModel, navController) },
-                    onEdit = { openEditor(it, viewModel, navController) }
-                )
-            }
-        }
-        composable(
-            route = NaatRoutes.EDITOR,
-            enterTransition = { slideInVertically(initialOffsetY = { it }) + fadeIn() },
-            popExitTransition = { slideOutVertically(targetOffsetY = { it }) + fadeOut() }
-        ) {
-            AddNaatModal(
-                viewModel = viewModel,
-                onClose = { closeEditor(viewModel, navController) }
-            )
+            selectedFolder != null -> viewModel.selectFolder(null)
+            favoritesOnly -> viewModel.setFavoritesOnly(false)
+            else -> viewModel.setSearchQuery("")
         }
     }
-}
-
-private fun navigateToTab(
-    tab: Int,
-    viewModel: NaatViewModel,
-    navController: NavHostController
-) {
-    val targetRoute = when (tab) {
-        0 -> NaatRoutes.LIBRARY
-        2 -> NaatRoutes.SETTINGS
-        else -> null
-    }
-
-    if (targetRoute != null) {
-        // launchSingleTop alone still dispatches a navigation operation and can
-        // restart destination transitions on some Navigation-Compose versions.
-        // Make reselecting the active tab a strict no-op before mutating UI state.
-        if (navController.currentDestination?.route == targetRoute) return
-
-        viewModel.selectTab(tab)
-        navController.navigate(targetRoute) {
-            popUpTo(navController.graph.findStartDestination().id) {
-                saveState = true
-            }
-            launchSingleTop = true
-            restoreState = true
-        }
-        return
-    }
-
-    if (tab == 1 && navController.currentDestination?.route != NaatRoutes.EDITOR) {
-        viewModel.selectTab(tab)
-        navController.navigate(NaatRoutes.EDITOR) { launchSingleTop = true }
-    }
-}
-
-private fun openReader(
-    naat: NaatEntity,
-    viewModel: NaatViewModel,
-    navController: NavHostController
-) {
-    viewModel.selectNaat(naat)
-    navController.navigate(NaatRoutes.READER) { launchSingleTop = true }
-}
-
-private fun closeReader(viewModel: NaatViewModel, navController: NavHostController) {
-    viewModel.selectNaat(null)
-    navController.popBackStack()
-}
-
-private fun openEditor(
-    naat: NaatEntity,
-    viewModel: NaatViewModel,
-    navController: NavHostController
-) {
-    viewModel.startEditNaat(naat)
-    navController.navigate(NaatRoutes.EDITOR) { launchSingleTop = true }
-}
-
-private fun closeEditor(viewModel: NaatViewModel, navController: NavHostController) {
-    if (viewModel.isSaving.value) return
-    viewModel.setShowAddModal(false)
-    navController.popBackStack()
 }

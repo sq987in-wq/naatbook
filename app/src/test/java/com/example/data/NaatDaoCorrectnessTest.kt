@@ -3,6 +3,7 @@ package com.example.data
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertFalse
@@ -21,6 +22,26 @@ class NaatDaoCorrectnessTest {
         .build()
 
     @After fun close() = database.close()
+
+    @Test
+    fun `library search executes in Room and returns lightweight summaries`() = runBlocking {
+        val dao = database.naatDao()
+        dao.insertNaat(
+            NaatEntity(
+                title = "Searchable title",
+                poet = "Poet",
+                category = NaatCategories.NAAT,
+                lyrics = "unique lyrics token " + "x".repeat(10_000),
+                audioType = "none",
+                audioPath = null,
+                isFavorite = false
+            )
+        )
+
+        val results = dao.getFilteredSummaries("unique lyrics token", null, false).first()
+
+        assertTrue(results.single().title == "Searchable title")
+    }
 
     @Test
     fun `favorite toggle uses current database value on every rapid call`() = runBlocking {

@@ -56,6 +56,7 @@ import com.example.ui.theme.NastaliqFamily
 import com.example.ui.theme.HighContrastRed
 import com.example.ui.theme.HighContrastGray
 import com.example.viewmodel.NaatViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -88,35 +89,8 @@ fun LyricsReaderScreen(
     var scrollSpeed by remember { mutableFloatStateOf(1f) } // Speed multiplier mapping
 
     // Sizing controls
-    val defaultFontSize by viewModel.globalFontSize.collectAsState()
+    val defaultFontSize by viewModel.globalFontSize.collectAsStateWithLifecycle()
     var localFontSize by remember { mutableStateOf(defaultFontSize) }
-
-    // Player controls are scoped to this entry; a modal preview or another
-    // entry can never drive this reader's transport UI.
-    val playbackController = viewModel.playbackController
-    val nowPlaying by playbackController.nowPlaying.collectAsState()
-    val hasActiveSession by playbackController.hasActiveSession.collectAsState()
-    val playerIsPlaying by playbackController.isPlaying.collectAsState()
-    val playerPosition by playbackController.currentPosition.collectAsState()
-    val playerDuration by playbackController.duration.collectAsState()
-    val attachments = listOfNotNull(
-        naat.audioPath?.let { naat.audioType to it },
-        naat.secondaryAudioPath?.let { naat.secondaryAudioType to it }
-    ).filter { it.first != "none" }
-    var selectedAudioPath by remember(naat.id) {
-        mutableStateOf(attachments.firstOrNull()?.second)
-    }
-    LaunchedEffect(attachments, nowPlaying?.audioPath) {
-        if (nowPlaying?.naatId == naat.id) selectedAudioPath = nowPlaying?.audioPath
-        else if (attachments.none { it.second == selectedAudioPath }) {
-            selectedAudioPath = attachments.firstOrNull()?.second
-        }
-    }
-    val ownsEntry = nowPlaying?.naatId == naat.id && hasActiveSession
-    val ownsSelectedAttachment = ownsEntry && nowPlaying?.audioPath == selectedAudioPath
-    val isPlaying = ownsSelectedAttachment && playerIsPlaying
-    val currentPos = if (ownsSelectedAttachment) playerPosition else 0
-    val audioDuration = if (ownsSelectedAttachment) playerDuration else 0
 
     // Sync local font size if global changes
     LaunchedEffect(defaultFontSize) {
@@ -205,95 +179,7 @@ fun LyricsReaderScreen(
             }
         },
         bottomBar = {
-            // Media Control Widget: Sticky mini-player widget fixed at the bottom
-            if (attachments.isNotEmpty()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.background)
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-                    if (attachments.size > 1) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            attachments.forEach { (type, path) ->
-                                TextButton(
-                                    onClick = {
-                                        selectedAudioPath = path
-                                        viewModel.startEntryPlayback(naat, path)
-                                    },
-                                    modifier = Modifier.testTag("reader_select_$type")
-                                ) {
-                                    Icon(
-                                        if (type == "recorded") Icons.Default.Mic else Icons.Default.MusicNote,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(
-                                        if (type == "recorded") "Voice Note" else "Linked Audio",
-                                        fontWeight = if (selectedAudioPath == path) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    val selectedType = attachments.firstOrNull { it.second == selectedAudioPath }?.first
-                        ?: attachments.first().first
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            if (selectedType == "recorded") Icons.Default.Mic else Icons.Default.MusicNote,
-                            contentDescription = null,
-                            tint = HighContrastGray,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            if (selectedType == "recorded") "Voice Note" else "Linked Audio",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = HighContrastGray
-                        )
-                    }
-                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = {
-                                val path = selectedAudioPath ?: return@IconButton
-                                if (isPlaying) playbackController.pause()
-                                else if (ownsSelectedAttachment) playbackController.resume()
-                                else viewModel.startEntryPlayback(naat, path)
-                            },
-                            modifier = Modifier.testTag("reader_play_pause")
-                        ) {
-                            Icon(
-                                if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (isPlaying) "Pause" else "Play",
-                                tint = MaterialTheme.colorScheme.onBackground,
-                                modifier = Modifier.size(32.dp)
-                            )
-                        }
-                        Slider(
-                            value = currentPos.toFloat(),
-                            onValueChange = { playbackController.seekTo(it.toInt()) },
-                            valueRange = 0f..(if (audioDuration > 0) audioDuration.toFloat() else 1000f),
-                            modifier = Modifier.weight(1f).testTag("reader_audio_seekbar")
-                        )
-                        Text(
-                            "${formatTime(currentPos)} / ${formatTime(audioDuration)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = HighContrastGray
-                        )
-                    }
-                }
-            }
+            ReaderAudioControls(naat, viewModel)
         }
     ) { innerPadding ->
         Column(
@@ -434,6 +320,99 @@ fun LyricsReaderScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ReaderAudioControls(naat: NaatEntity, viewModel: NaatViewModel) {
+    val controller = viewModel.playbackController
+    val nowPlaying by controller.nowPlaying.collectAsStateWithLifecycle()
+    val hasSession by controller.hasActiveSession.collectAsStateWithLifecycle()
+    val playerIsPlaying by controller.isPlaying.collectAsStateWithLifecycle()
+    val playerPosition by controller.currentPosition.collectAsStateWithLifecycle()
+    val playerDuration by controller.duration.collectAsStateWithLifecycle()
+    val attachments = remember(naat.id, naat.audioPath, naat.secondaryAudioPath) {
+        listOfNotNull(
+            naat.audioPath?.let { naat.audioType to it },
+            naat.secondaryAudioPath?.let { naat.secondaryAudioType to it }
+        ).filter { it.first != "none" }
+    }
+    if (attachments.isEmpty()) return
+
+    var selectedPath by remember(naat.id) { mutableStateOf(attachments.first().second) }
+    LaunchedEffect(attachments, nowPlaying?.audioPath) {
+        if (nowPlaying?.naatId == naat.id) selectedPath = nowPlaying?.audioPath ?: selectedPath
+        else if (attachments.none { it.second == selectedPath }) selectedPath = attachments.first().second
+    }
+    val ownsSelected = nowPlaying?.naatId == naat.id && nowPlaying?.audioPath == selectedPath && hasSession
+    val playing = ownsSelected && playerIsPlaying
+    val position = if (ownsSelected) playerPosition else 0
+    val duration = if (ownsSelected) playerDuration else 0
+    val selectedType = attachments.firstOrNull { it.second == selectedPath }?.first ?: attachments.first().first
+
+    Column(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
+            .navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+        if (attachments.size > 1) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                attachments.forEach { (type, path) ->
+                    TextButton(
+                        onClick = {
+                            selectedPath = path
+                            viewModel.startEntryPlayback(naat, path)
+                        },
+                        modifier = Modifier.testTag("reader_select_$type")
+                    ) {
+                        Icon(
+                            if (type == "recorded") Icons.Default.Mic else Icons.Default.MusicNote,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            if (type == "recorded") "Voice Note" else "Linked Audio",
+                            fontWeight = if (selectedPath == path) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+        }
+        Text(
+            if (selectedType == "recorded") "Voice Note" else "Linked Audio",
+            modifier = Modifier.align(Alignment.CenterHorizontally),
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            color = HighContrastGray
+        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(
+                onClick = {
+                    if (playing) controller.pause()
+                    else if (ownsSelected) controller.resume()
+                    else viewModel.startEntryPlayback(naat, selectedPath)
+                },
+                modifier = Modifier.testTag("reader_play_pause")
+            ) {
+                Icon(
+                    if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (playing) "Pause" else "Play",
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+            Slider(
+                value = position.toFloat(),
+                onValueChange = { controller.seekTo(it.toInt()) },
+                valueRange = 0f..(if (duration > 0) duration.toFloat() else 1000f),
+                modifier = Modifier.weight(1f).testTag("reader_audio_seekbar")
+            )
+            Text(
+                "${formatTime(position)} / ${formatTime(duration)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = HighContrastGray
+            )
         }
     }
 }

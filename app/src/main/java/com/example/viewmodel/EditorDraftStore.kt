@@ -5,6 +5,8 @@ import com.example.data.NaatCategories
 
 /** Single serialization boundary for the editor's recreation-safe state. */
 internal class EditorDraftStore(private val handle: SavedStateHandle) {
+    fun hasSnapshot(): Boolean = handle.contains("draft.active")
+
     fun restore(): EditorDraft = EditorDraft(
         active = handle[ACTIVE] ?: false,
         editingId = handle[EDITING_ID],
