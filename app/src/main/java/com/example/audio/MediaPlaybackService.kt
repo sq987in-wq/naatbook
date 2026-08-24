@@ -19,6 +19,7 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class MediaPlaybackService : MediaSessionService() {
     @Inject lateinit var engine: Media3PlaybackEngine
+    @Inject lateinit var playbackController: PlaybackController
     @Inject lateinit var playbackRequests: PlaybackRequestRegistry
 
     private var mediaSession: MediaSession? = null
@@ -97,11 +98,17 @@ class MediaPlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
-        // A normal controller stop already idles the singleton before the delayed
-        // service shutdown. If Android destroys the service unexpectedly while the
-        // player is still active, force it idle so no unowned player/wake resource
-        // can outlive the MediaSessionService.
-        if (!engine.isIdle()) engine.ensureIdle()
+        // A normal controller stop already idles the singleton before shutdown.
+        // A preview intentionally outlives this service after entry → preview handoff
+        // so it remains notification-free; every non-preview active player is forced
+        // idle here to avoid an unowned player/wake resource after service teardown.
+        if (PlayerLifetimePolicy.shouldEnsureIdleOnServiceDestroy(
+                engineIdle = engine.isIdle(),
+                previewActive = playbackController.previewPath.value != null
+            )
+        ) {
+            engine.ensureIdle()
+        }
         clearListener()
         mediaSession?.let { session ->
             if (isSessionAdded(session)) removeSession(session)
