@@ -14,18 +14,22 @@ android {
     minSdk = 24
     targetSdk = 36
     versionCode = 1
-    versionName = "1.0"
+    versionName = "1.0.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
+      val keystorePath = System.getenv("ANDROID_SIGNING_KEYSTORE_PATH")
+        ?: System.getenv("KEYSTORE_PATH")
+        ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      storePassword = System.getenv("ANDROID_SIGNING_STORE_PASSWORD")
+        ?: System.getenv("STORE_PASSWORD")
+      keyAlias = System.getenv("ANDROID_SIGNING_KEY_ALIAS") ?: "upload"
+      keyPassword = System.getenv("ANDROID_SIGNING_KEY_PASSWORD")
+        ?: System.getenv("KEY_PASSWORD")
     }
   }
 
@@ -61,7 +65,11 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       // Only sign release builds when a real upload keystore is available,
       // so local/CI validation does not require a keystore checked into the repository.
-      val releaseKeystore = File(System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks")
+      val releaseKeystore = File(
+        System.getenv("ANDROID_SIGNING_KEYSTORE_PATH")
+          ?: System.getenv("KEYSTORE_PATH")
+          ?: "${rootDir}/my-upload-key.jks"
+      )
       if (releaseKeystore.exists()) {
         signingConfig = signingConfigs.getByName("release")
       }
