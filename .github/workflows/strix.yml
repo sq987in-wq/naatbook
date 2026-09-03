@@ -13,9 +13,9 @@ on:
           - standard
           - deep
       max_budget:
-        description: 'Max LLM spend in USD'
+        description: 'Max LLM spend cap in USD (Must be > 0)'
         required: false
-        default: '0'
+        default: '5'
         type: string
 
 jobs:
@@ -47,7 +47,7 @@ jobs:
           STRIX_LLM: "openrouter/openrouter/free"
           LLM_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
-          strix -n --target ./ --scan-mode ${{ inputs.scan_mode }} --max-budget ${{ inputs.max_budget }}
+          strix -n -t ./ -m ${{ inputs.scan_mode }} --max-budget ${{ inputs.max_budget }}
 
       - name: Upload Audit Report
         if: always()
