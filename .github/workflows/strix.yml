@@ -1,0 +1,68 @@
+name: Strix Security Pentest
+
+on:
+  workflow_dispatch:
+    inputs:
+      scan_mode:
+        description: 'Scan depth'
+        required: false
+        default: 'standard'
+        type: choice
+        options:
+          - quick
+          - standard
+          - deep
+      max_budget:
+        description: 'Max LLM spend in USD'
+        required: false
+        default: '10'
+        type: string
+
+jobs:
+  security-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Strix CLI
+        run: |
+          curl -sSL https://strix.ai/install | bash
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.strix/bin" >> $GITHUB_PATH
+
+      - name: Verify Docker & Strix
+        run: |
+          docker --version
+          docker info
+          strix --help || $HOME/.local/bin/strix --help || $HOME/.strix/bin/strix --help
+
+      - name: Run Strix Security Audit
+        env:
+          STRIX_LLM: "openrouter/anthropic/claude-3-5-sonnet"
+          LLM_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          strix -n --target ./ --scan-mode ${{ inputs.scan_mode }} --max-budget ${{ inputs.max_budget }}
+
+      - name: Upload Audit Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strix-pentest-report-${{ github.run_number }}
+          path: |
+            strix_runs/
+            **/*.log
+          if-no-files-found: warn
+          retention-days: 14
+          
