@@ -36,17 +36,12 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Strix CLI
+      - name: Install uv and Strix from source
         run: |
-          curl -sSL https://strix.ai/install | bash
+          python -m pip install --upgrade pip uv
+          # ब्रोकन बाइनरी के बजाय सीधे ऑफिशियल गिट सोर्स से सारे डिपेंडेंसीज सहित इंस्टॉल करें
+          uv tool install git+https://github.com/usestrix/strix.git
           echo "$HOME/.local/bin" >> $GITHUB_PATH
-          echo "$HOME/.strix/bin" >> $GITHUB_PATH
-
-      - name: Verify Docker & Strix
-        run: |
-          docker --version
-          docker info
-          strix --help || $HOME/.local/bin/strix --help || $HOME/.strix/bin/strix --help
 
       - name: Run Strix Security Audit
         env:
