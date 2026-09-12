@@ -98,6 +98,12 @@ fun NaatApp(viewModel: NaatViewModel) {
         viewModel.loadNaat(
             id = id,
             onLoaded = { naat ->
+                // Release the coalescing gate deterministically on success. Relying
+                // solely on the route-change LaunchedEffect leaves a window where a
+                // stale gate swallows the next tap (the folder LazyColumn reuses its
+                // item compositions across the reader round-trip, so its handlers keep
+                // observing a stuck flag until the folder is left and re-entered).
+                detailNavigationPending = false
                 viewModel.selectNaat(naat)
                 navController.navigate(NaatRoutes.READER) { launchSingleTop = true }
             },
@@ -116,7 +122,10 @@ fun NaatApp(viewModel: NaatViewModel) {
         detailNavigationPending = true
         viewModel.loadNaat(
             id = id,
-            onLoaded = { naat -> viewModel.startEditNaat(naat) },
+            onLoaded = { naat ->
+                detailNavigationPending = false
+                viewModel.startEditNaat(naat)
+            },
             onFailure = { detailNavigationPending = false }
         )
     }

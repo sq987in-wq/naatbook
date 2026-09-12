@@ -75,6 +75,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -100,6 +101,17 @@ fun LyricsReaderScreen(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
+    // Capture the status-bar inset once, while the reader is still non-immersive and
+    // the system bars are visible. Once immersive mode hides the bars, the window's
+    // reported inset collapses to 0, so re-reading it later would re-introduce the
+    // notch overlap; remember keeps the first (correct) measurement stable.
+    val statusBarTopPx = remember {
+        val view = (context as? Activity)?.window?.decorView
+        view?.let { ViewCompat.getRootWindowInsets(it) }
+            ?.getInsets(WindowInsetsCompat.Type.statusBars())
+            ?.top
+            ?: 0
+    }
     val scrollState = rememberScrollState()
 
     // Keep the screen on while reciting — the reader must never dim mid-performance.
@@ -146,7 +158,7 @@ fun LyricsReaderScreen(
 
     fun enterImmersive() {
         if (immersive) return
-        compensateForTopChromeChange(topChromeHeightPx, 0)
+        compensateForTopChromeChange(topChromeHeightPx, statusBarTopPx)
         immersive = true
         immersiveChromeVisible = false
         showImmersiveHint = true
@@ -154,7 +166,7 @@ fun LyricsReaderScreen(
 
     fun exitImmersive() {
         if (!immersive) return
-        val fromTop = if (immersiveChromeVisible) topChromeHeightPx else 0
+        val fromTop = if (immersiveChromeVisible) topChromeHeightPx else statusBarTopPx
         compensateForTopChromeChange(fromTop, topChromeHeightPx)
         immersive = false
         immersiveChromeVisible = false
@@ -163,8 +175,8 @@ fun LyricsReaderScreen(
 
     fun toggleImmersiveChrome() {
         if (!immersive) return
-        val fromTop = if (immersiveChromeVisible) topChromeHeightPx else 0
-        val toTop = if (immersiveChromeVisible) 0 else topChromeHeightPx
+        val fromTop = if (immersiveChromeVisible) topChromeHeightPx else statusBarTopPx
+        val toTop = if (immersiveChromeVisible) statusBarTopPx else topChromeHeightPx
         compensateForTopChromeChange(fromTop, toTop)
         immersiveChromeVisible = !immersiveChromeVisible
         showImmersiveHint = !immersiveChromeVisible
@@ -208,7 +220,7 @@ fun LyricsReaderScreen(
         }
     }
 
-    val topContentPaddingPx = if (readerChromeVisible) topChromeHeightPx else 0
+    val topContentPaddingPx = if (readerChromeVisible) topChromeHeightPx else statusBarTopPx
     val bottomContentPaddingPx = if (readerChromeVisible) bottomChromeHeightPx else 0
 
     Box(
