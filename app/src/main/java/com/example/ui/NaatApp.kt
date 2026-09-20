@@ -20,7 +20,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -63,11 +62,7 @@ fun NaatApp(viewModel: NaatViewModel) {
     val isAttaching by viewModel.isAttachingFile.collectAsStateWithLifecycle()
 
     var showDiscardConfirmation by rememberSaveable { mutableStateOf(false) }
-    var detailNavigationPending by remember { mutableStateOf(false) }
-    LaunchedEffect(currentRoute, showAddModal) {
-        // The sheet has no navigation destination. Release the coalescing gate only
-        // once either a real detail route or the state-owned editor is visible.
-        if (currentRoute != NaatRoutes.HOME || showAddModal) detailNavigationPending = false
+    LaunchedEffect(showAddModal) {
         if (!showAddModal) showDiscardConfirmation = false
     }
 
@@ -84,55 +79,73 @@ fun NaatApp(viewModel: NaatViewModel) {
         }
     }
 
-    // Reader closure remains state-driven. Editor closure is sheet state-driven, so
-    // there is no second NavHost pop authority for add/edit requests.
+    // Reader closure is event-driven: closeReader() pops the NavHost back stack
+    // directly instead of relaying selectNaat(null) through a LaunchedEffect. A
+    // state-driven two-hop pop leaves the NavHost's restored HOME destination
+    // dependent on a transition re-settle, which is exactly what dead-taps the
+    // folder list after a reader round-trip. This effect remains only as a safety
+    // net for state paths that null selectedNaat without a close event (deleting
+    // the open entry, or restoring the READER route after process death).
     LaunchedEffect(currentRoute, selectedNaat) {
         if (currentRoute == NaatRoutes.READER && selectedNaat == null) navController.popBackStack()
     }
 
-    AppBackHandler(currentRoute, currentTab, showAddModal, viewModel)
+    // Opening the reader pops the back stack down to HOME before pushing READER.
+    // In a healthy state this is a no-op (only HOME is on the stack), but if a
+    // stale READER entry ever lingers above HOME, this guarantees the navigation
+    // still lands on a fresh, interactive destination instead of being silently
+    // deduplicated by launchSingleTop — the mechanism that made every list tap
+    // look completely ignored after returning from the reader.
+    fun navigateToReader() {
+        navController.navigate(NaatRoutes.READER) {
+            popUpTo(NaatRoutes.HOME)
+            launchSingleTop = true
+        }
+    }
+
+    fun closeReader() {
+        // Pop first so the READER destination leaves composition this frame;
+        // clearing selectedNaat afterwards avoids a one-frame empty-reader flash.
+        navController.popBackStack()
+        viewModel.selectNaat(null)
+    }
+
+    AppBackHandler(currentRoute, currentTab, showAddModal, ::closeReader, viewModel)
 
     fun openReader(id: Int) {
-        if (detailNavigationPending || showAddModal || currentRoute != NaatRoutes.HOME) return
-        detailNavigationPending = true
+        // No coalescing gate and no route guard: a row tap must never be silently
+        // dropped. Re-entry is already impossible — launchSingleTop + popUpTo in
+        // navigateToReader coalesce double taps, and selectNaat is idempotent for
+        // the winning entry.
+        if (showAddModal) return
         viewModel.loadNaat(
             id = id,
             onLoaded = { naat ->
-                // Release the coalescing gate deterministically on success. Relying
-                // solely on the route-change LaunchedEffect leaves a window where a
-                // stale gate swallows the next tap (the folder LazyColumn reuses its
-                // item compositions across the reader round-trip, so its handlers keep
-                // observing a stuck flag until the folder is left and re-entered).
-                detailNavigationPending = false
                 viewModel.selectNaat(naat)
-                navController.navigate(NaatRoutes.READER) { launchSingleTop = true }
+                navigateToReader()
             },
-            onFailure = { detailNavigationPending = false }
+            onFailure = { }
         )
     }
 
     fun openEditorEntry(naat: NaatEntity) {
-        if (detailNavigationPending || showAddModal) return
-        detailNavigationPending = true
+        // startEditNaat activates the sheet state synchronously, which is the only
+        // re-entry guard this path needs.
+        if (showAddModal) return
         viewModel.startEditNaat(naat)
     }
 
     fun openEditorById(id: Int) {
-        if (detailNavigationPending || showAddModal || currentRoute != NaatRoutes.HOME) return
-        detailNavigationPending = true
+        if (showAddModal) return
         viewModel.loadNaat(
             id = id,
-            onLoaded = { naat ->
-                detailNavigationPending = false
-                viewModel.startEditNaat(naat)
-            },
-            onFailure = { detailNavigationPending = false }
+            onLoaded = { naat -> viewModel.startEditNaat(naat) },
+            onFailure = { }
         )
     }
 
     fun openAdd() {
-        if (detailNavigationPending || showAddModal || currentRoute != NaatRoutes.HOME) return
-        detailNavigationPending = true
+        if (showAddModal) return
         // A FAB press always represents a deliberately fresh new entry, never a
         // dormant edit draft. startAddDraft handles recorder/file cleanup off-main.
         viewModel.startAddDraft(forceFresh = true)
@@ -163,13 +176,10 @@ fun NaatApp(viewModel: NaatViewModel) {
                                 GlobalMiniPlayer(
                                     viewModel = viewModel,
                                     onOpen = {
+                                        // openNowPlayingEntry owns its own re-entry
+                                        // gate (_isOpeningNowPlaying); no UI gate here.
                                         viewModel.openNowPlayingEntry { found ->
-                                            if (found && !detailNavigationPending && !showAddModal) {
-                                                detailNavigationPending = true
-                                                navController.navigate(NaatRoutes.READER) {
-                                                    launchSingleTop = true
-                                                }
-                                            }
+                                            if (found && !showAddModal) navigateToReader()
                                         }
                                     }
                                 )
@@ -215,7 +225,7 @@ fun NaatApp(viewModel: NaatViewModel) {
                                 LyricsReaderScreen(
                                     naat = naat,
                                     viewModel = viewModel,
-                                    onClose = { viewModel.selectNaat(null) },
+                                    onClose = ::closeReader,
                                     onEdit = ::openEditorEntry
                                 )
                             }
@@ -265,6 +275,7 @@ private fun AppBackHandler(
     currentRoute: String?,
     currentTab: Int,
     editorModalVisible: Boolean,
+    closeReader: () -> Unit,
     viewModel: NaatViewModel
 ) {
     val selectedFolder by viewModel.selectedFolder.collectAsStateWithLifecycle()
@@ -278,7 +289,7 @@ private fun AppBackHandler(
     )
     BackHandler(enabled = canHandleAppBack) {
         when {
-            currentRoute == NaatRoutes.READER -> viewModel.selectNaat(null)
+            currentRoute == NaatRoutes.READER -> closeReader()
             currentRoute == NaatRoutes.HOME && currentTab == 2 -> {
                 viewModel.selectTab(0)
                 viewModel.resetLibraryToHome()
