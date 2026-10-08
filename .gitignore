@@ -17,5 +17,8 @@ local.properties
 debug.keystore
 
 # Signing keystores must never be committed (see README: signing via env vars only)
+# Exception: app/debug.keystore is a shared DEBUG key (password "android") so all
+# CI builds sign with the same key and APK updates install without uninstall.
 *.jks
 *.keystore
+!app/debug.keystore
