@@ -135,4 +135,9 @@
     <string name="status_import_failed">Import Failed: %1$s</string>
     <string name="status_error_database">database error</string>
     <string name="status_error_storage">storage error</string>
+    <string name="status_error_unknown">unknown error</string>
+    <string name="editor_attached_file">Attached file: %1$s</string>
+    <string name="library_delete_message">"%1$s" will be permanently deleted%2$s</string>
+    <string name="library_delete_with_audio"> along with its attached audio.</string>
+    <string name="library_entries_count">%1$d ENTRIES</string>
 </resources>

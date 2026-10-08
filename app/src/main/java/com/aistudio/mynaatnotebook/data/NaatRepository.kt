@@ -15,7 +15,18 @@ class NaatRepository @Inject constructor(private val naatDao: NaatDao) {
         query: String,
         folder: String?,
         favoritesOnly: Boolean
-    ): Flow<List<NaatSummary>> = naatDao.getFilteredSummaries(query, folder, favoritesOnly)
+    ): Flow<List<NaatSummary>> =
+        naatDao.getFilteredSummaries(escapeLikeWildcards(query), folder, favoritesOnly)
+
+    companion object {
+        /**
+         * Escapes LIKE wildcards so a literal '%' or '_' in the user's search
+         * is matched literally, not as a wildcard. Must stay in sync with the
+         * ESCAPE '\' clause in [NaatDao.getFilteredSummaries].
+         */
+        fun escapeLikeWildcards(query: String): String =
+            query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    }
 
     fun getNaatByIdFlow(id: Int): Flow<NaatEntity?> = naatDao.getNaatByIdFlow(id)
 

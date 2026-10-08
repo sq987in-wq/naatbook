@@ -180,7 +180,10 @@ class NaatViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val categoryCounts: StateFlow<Map<String, Int>> = repository.categoryCounts
-        .map { rows -> rows.associate { NaatCategories.normalize(it.category) to it.count } }
+        .map { rows ->
+            rows.groupBy { NaatCategories.normalize(it.category) }
+                .mapValues { (_, group) -> group.sumOf { it.count } }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     @OptIn(kotlinx.coroutines.FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -625,10 +628,27 @@ class NaatViewModel @Inject constructor(
     }
 
     // --- Local device file attachment ---
+    private fun resolveAudioExtension(uri: Uri): String {
+        // 1. MIME type from ContentResolver -> extension
+        val mimeType = runCatching { context.contentResolver.getType(uri) }.getOrNull()
+        val fromMime = mimeType?.let {
+            android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(it)
+        }
+        if (!fromMime.isNullOrBlank()) return fromMime.lowercase()
+        // 2. Extension from URI path / display name
+        val fromPath = uri.lastPathSegment?.substringAfterLast('.', "")?.lowercase()
+        if (!fromPath.isNullOrBlank() && fromPath.length <= 5) return fromPath
+        // 3. Fallback
+        return "mp3"
+    }
+
     private suspend fun copyLocalFileToAppStorageLocked(uri: Uri): File? = withContext(Dispatchers.IO) {
+        // Preserve the source file's extension instead of hardcoding .mp3 so the
+        // player/sniffer sees the real format (wav, ogg, m4a, ...).
+        val extension = resolveAudioExtension(uri)
         val destination = File(
             ensureDirectoryOnIo(linkedDirectory()),
-            "linked_${System.currentTimeMillis()}_file.mp3"
+            "linked_${System.currentTimeMillis()}_file.$extension"
         )
         try {
             val input = context.contentResolver.openInputStream(uri) ?: return@withContext null
@@ -682,7 +702,7 @@ class NaatViewModel @Inject constructor(
         withContext(Dispatchers.Main.immediate) {
             persistDraft(draft.copy(
                 newAttachmentPath = file.absolutePath,
-                newAttachmentName = "Attached file: ${file.name}"
+                newAttachmentName = file.name
             ))
         }
     }

@@ -34,9 +34,9 @@ interface NaatDao {
         FROM naats
         WHERE (:folder IS NULL OR category = :folder COLLATE NOCASE)
           AND (:favoritesOnly = 0 OR isFavorite = 1)
-          AND (:query = '' OR title LIKE '%' || :query || '%' COLLATE NOCASE
-               OR poet LIKE '%' || :query || '%' COLLATE NOCASE
-               OR lyrics LIKE '%' || :query || '%' COLLATE NOCASE)
+          AND (:query = '' OR title LIKE '%' || :query || '%' ESCAPE '\' COLLATE NOCASE
+               OR poet LIKE '%' || :query || '%' ESCAPE '\' COLLATE NOCASE
+               OR lyrics LIKE '%' || :query || '%' ESCAPE '\' COLLATE NOCASE)
         ORDER BY createdAt DESC
     """)
     fun getFilteredSummaries(
