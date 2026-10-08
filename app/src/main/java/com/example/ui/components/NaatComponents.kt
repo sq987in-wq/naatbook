@@ -57,7 +57,6 @@ import com.example.ui.theme.HighContrastRed
 import com.example.ui.theme.HighContrastGray
 import com.example.viewmodel.NaatViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -86,7 +85,7 @@ fun NaatBottomNavigation(
         contentPadding = PaddingValues(horizontal = 12.dp),
         actions = {
             BottomBarTab(
-                label = stringResource(R.string.nav_library),
+                label = "LIBRARY",
                 icon = Icons.Default.Home,
                 selected = currentTab == 0,
                 onClick = { onTabSelected(0) },
@@ -109,14 +108,14 @@ fun NaatBottomNavigation(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
-                        contentDescription = stringResource(R.string.nav_add_entry_cd),
+                        contentDescription = "Add new entry",
                         modifier = Modifier.size(28.dp)
                     )
                 }
             }
 
             BottomBarTab(
-                label = stringResource(R.string.nav_settings),
+                label = "SETTINGS",
                 icon = Icons.Default.Settings,
                 selected = currentTab == 2,
                 onClick = { onTabSelected(2) },
@@ -247,7 +246,7 @@ fun GlobalMiniPlayer(
             ) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (isPlaying) stringResource(R.string.common_pause) else stringResource(R.string.common_play),
+                    contentDescription = if (isPlaying) "Pause" else "Play",
                     tint = fg,
                     modifier = Modifier.size(26.dp)
                 )
@@ -316,7 +315,7 @@ fun AudioAttachmentPreview(
         ) {
             Icon(
                 imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = if (isPlaying) stringResource(R.string.player_preview_pause_cd) else stringResource(R.string.player_preview_play_cd),
+                contentDescription = if (isPlaying) "Pause preview" else "Play preview",
                 tint = MaterialTheme.colorScheme.onBackground
             )
         }
@@ -324,7 +323,7 @@ fun AudioAttachmentPreview(
             text = if (ownsPreview) {
                 "${formatTime(currentPos)} / ${formatTime(duration)}"
             } else {
-                stringResource(R.string.player_preview_label)
+                "Preview"
             },
             style = MaterialTheme.typography.bodySmall,
             color = HighContrastGray
