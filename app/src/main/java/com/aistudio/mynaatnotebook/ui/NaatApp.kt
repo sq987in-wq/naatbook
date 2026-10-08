@@ -75,9 +75,11 @@ fun NaatApp(
     var showDiscardConfirmation by rememberSaveable { mutableStateOf(false) }
     var detailNavigationPending by remember { mutableStateOf(false) }
     LaunchedEffect(currentRoute, showAddModal) {
-        // The sheet has no navigation destination. Release the coalescing gate only
-        // once either a real detail route or the state-owned editor is visible.
-        if (currentRoute != NaatRoutes.HOME || showAddModal) detailNavigationPending = false
+        // Always release the coalescing gate when navigation/modal state settles.
+        // The guard only blocks double-taps during the transition itself; once the
+        // route or sheet state changes (in any direction), the attempt is over and
+        // the guard must not stick. A stuck guard silently kills all entry/edit/FAB taps.
+        detailNavigationPending = false
         if (!showAddModal) showDiscardConfirmation = false
     }
 
