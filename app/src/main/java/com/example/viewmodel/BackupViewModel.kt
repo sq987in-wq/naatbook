@@ -3,6 +3,7 @@ package com.example.viewmodel
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.R
 import com.example.data.BackupManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
@@ -23,24 +24,24 @@ class BackupViewModel @Inject constructor(
 
     fun backupNotebook(uri: Uri) {
         viewModelScope.launch {
-            statusReporter.show("Exporting backup, please wait...")
+            statusReporter.show(R.string.status_exporting)
             val result = backupManager.exportBackup(uri)
             result.onSuccess {
-                statusReporter.show("Library Backup Exported Successfully!")
+                statusReporter.show(R.string.status_export_success)
             }.onFailure {
-                statusReporter.show("Export Failed: ${it.localizedMessage}")
+                statusReporter.show(R.string.status_export_failed, it.localizedMessage ?: StatusMessage.Res(R.string.status_error_database))
             }
         }
     }
 
     fun restoreNotebook(uri: Uri) {
         viewModelScope.launch {
-            statusReporter.show("Importing backup, please wait...")
+            statusReporter.show(R.string.status_importing)
             val result = backupManager.importBackup(uri)
             result.onSuccess { count ->
-                statusReporter.show("Library Restored Successfully! Loaded $count entries.")
+                statusReporter.show(R.string.status_import_success, count)
             }.onFailure {
-                statusReporter.show("Import Failed: ${it.localizedMessage}")
+                statusReporter.show(R.string.status_import_failed, it.localizedMessage ?: StatusMessage.Res(R.string.status_error_database))
             }
         }
     }

@@ -10,6 +10,7 @@ import com.example.audio.*
 import com.example.data.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.example.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -276,7 +277,7 @@ class NaatViewModel @Inject constructor(
 
     // Status/toast messages are shared process-wide via StatusReporter so every
     // feature ViewModel reports through the single channel the UI already collects.
-    val statusMessage: StateFlow<String?> = statusReporter.message
+    val statusMessage: StateFlow<StatusMessage?> = statusReporter.message
 
     fun clearStatusMessage() = statusReporter.clear()
 
@@ -414,7 +415,7 @@ class NaatViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 Log.e("NaatViewModel", "Unable to open now-playing entry", e)
-                statusReporter.show("Unable to open the playing entry: ${e.localizedMessage ?: "database error"}")
+                statusReporter.show(R.string.status_open_playing_failed, e.localizedMessage ?: StatusMessage.Res(R.string.status_error_database))
                 onResolved(false) // preserve playback when lookup itself failed
             } finally {
                 _isOpeningNowPlaying.value = false
@@ -530,12 +531,12 @@ class NaatViewModel @Inject constructor(
                             persistDraft(_editorDraft.value.copy(finishedRecordingPath = null))
                             stopRecordingMeter()
                         }
-                        statusReporter.show("Unable to start recording")
+                        statusReporter.show(R.string.status_recording_start_failed)
                     }
                 }
             } catch (error: Exception) {
                 Log.e("NaatViewModel", "Unable to start recording", error)
-                statusReporter.show("Unable to start recording: ${error.localizedMessage ?: "storage error"}")
+                statusReporter.show(R.string.status_recording_start_failed_detail, error.localizedMessage ?: StatusMessage.Res(R.string.status_error_storage))
             } finally {
                 recordingGate.finish()
             }
@@ -817,16 +818,16 @@ class NaatViewModel @Inject constructor(
                         if (_selectedNaat.value?.id == saved.id) _selectedNaat.value = saved
                         statusReporter.show(
                             if (draft.editingId == null) {
-                                "Notebook Entry Saved!"
+                                R.string.status_entry_saved
                             } else {
-                                "Entry Updated!"
+                                R.string.status_entry_updated
                             }
                         )
                     }
                 }
             } catch (error: Exception) {
                 Log.e("NaatViewModel", "Save failed", error)
-                statusReporter.show("Save failed: ${error.localizedMessage ?: "database error"}")
+                statusReporter.show(R.string.status_save_failed, error.localizedMessage ?: StatusMessage.Res(R.string.status_error_database))
                 // Keep the modal and draft files intact so the user can retry.
             } finally {
                 _isSaving.value = false
@@ -847,7 +848,7 @@ class NaatViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 Log.e("NaatViewModel", "Favorite toggle failed", e)
-                statusReporter.show("Could not update favorite")
+                statusReporter.show(R.string.status_favorite_failed)
             }
         }
     }
@@ -860,12 +861,12 @@ class NaatViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 repository.getNaatById(id)?.let(onLoaded) ?: run {
-                    statusReporter.show("Entry no longer exists")
+                    statusReporter.show(R.string.status_entry_missing)
                     onFailure()
                 }
             } catch (error: Exception) {
                 Log.e("NaatViewModel", "Entry lookup failed", error)
-                statusReporter.show("Unable to open entry")
+                statusReporter.show(R.string.status_entry_lookup_failed)
                 onFailure()
             }
         }
@@ -903,16 +904,16 @@ class NaatViewModel @Inject constructor(
                 }
                 withContext(Dispatchers.Main.immediate) {
                     if (deleted == null) {
-                        statusReporter.show("Entry no longer exists")
+                        statusReporter.show(R.string.status_entry_missing)
                     } else {
                         if (_selectedNaat.value?.id == deleted.id) _selectedNaat.value = null
-                        statusReporter.show("Entry deleted")
+                        statusReporter.show(R.string.status_entry_deleted)
                         onSuccess()
                     }
                 }
             } catch (error: Exception) {
                 Log.e("NaatViewModel", "Delete failed", error)
-                statusReporter.show("Delete failed: ${error.localizedMessage ?: "database error"}")
+                statusReporter.show(R.string.status_delete_failed, error.localizedMessage ?: StatusMessage.Res(R.string.status_error_database))
             } finally {
                 _isDeleting.value = false
                 deleteGate.finish()

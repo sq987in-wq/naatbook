@@ -133,4 +133,6 @@
     <string name="status_importing">Importing backup, please wait...</string>
     <string name="status_import_success">Library Restored Successfully! Loaded %1$d entries.</string>
     <string name="status_import_failed">Import Failed: %1$s</string>
+    <string name="status_error_database">database error</string>
+    <string name="status_error_storage">storage error</string>
 </resources>
