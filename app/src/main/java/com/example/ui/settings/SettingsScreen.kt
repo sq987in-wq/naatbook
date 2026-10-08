@@ -39,7 +39,9 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.res.painterResource
+import com.example.BuildConfig
 import com.example.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -95,7 +97,7 @@ fun SettingsScreen(viewModel: NaatViewModel) {
             .verticalScroll(rememberScrollState())
     ) {
         Text(
-            text = "App Settings",
+            text = stringResource(R.string.settings_title),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 20.dp)
@@ -103,7 +105,7 @@ fun SettingsScreen(viewModel: NaatViewModel) {
 
         // 1. Theme Configuration
         Text(
-            text = "App Theme",
+            text = stringResource(R.string.settings_theme_title),
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.titleMedium
         )
@@ -118,9 +120,9 @@ fun SettingsScreen(viewModel: NaatViewModel) {
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 listOf(
-                    "system" to "Match System Settings",
-                    "white" to "Total White Mode",
-                    "black" to "Total Black Mode"
+                    "system" to stringResource(R.string.settings_theme_system),
+                    "white" to stringResource(R.string.settings_theme_white),
+                    "black" to stringResource(R.string.settings_theme_black)
                 ).forEach { (mode, title) ->
                     Row(
                         modifier = Modifier
@@ -144,7 +146,7 @@ fun SettingsScreen(viewModel: NaatViewModel) {
 
         // 2. Default Font Sizing adjustment
         Text(
-            text = "Typography Adjustment",
+            text = stringResource(R.string.settings_typography_title),
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.titleMedium
         )
@@ -164,7 +166,7 @@ fun SettingsScreen(viewModel: NaatViewModel) {
                 var pendingFontSize by remember { mutableFloatStateOf(globalFontSize) }
                 LaunchedEffect(globalFontSize) { pendingFontSize = globalFontSize }
                 Text(
-                    text = "Lyrics Default Text Size: ${pendingFontSize.toInt()} sp",
+                    text = stringResource(R.string.settings_font_size_label, pendingFontSize.toInt()),
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(modifier = Modifier.height(8.dp))
@@ -197,13 +199,13 @@ fun SettingsScreen(viewModel: NaatViewModel) {
 
         // 3. Local Backup & Restore Offline
         Text(
-            text = "Privacy & Local Database Backups",
+            text = stringResource(R.string.settings_backup_title),
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.titleMedium
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "All database records and audio assets are saved strictly locally. Safeguard your work below.",
+            text = stringResource(R.string.settings_backup_description),
             style = MaterialTheme.typography.bodySmall,
             color = HighContrastGray
         )
@@ -226,9 +228,9 @@ fun SettingsScreen(viewModel: NaatViewModel) {
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.onBackground),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Icon(Icons.Default.Download, contentDescription = "Export")
+                Icon(Icons.Default.Download, contentDescription = stringResource(R.string.settings_export_cd))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Export ZIP", fontSize = 12.sp)
+                Text(stringResource(R.string.settings_export_zip), fontSize = 12.sp)
             }
 
             Button(
@@ -242,15 +244,15 @@ fun SettingsScreen(viewModel: NaatViewModel) {
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.onBackground),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Icon(Icons.Default.Upload, contentDescription = "Import")
+                Icon(Icons.Default.Upload, contentDescription = stringResource(R.string.settings_import_cd))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Import ZIP", fontSize = 12.sp)
+                Text(stringResource(R.string.settings_import_zip), fontSize = 12.sp)
             }
         }
 
         Spacer(modifier = Modifier.height(40.dp))
         Text(
-            text = "NaatBook v1.0.0\n100% Offline | Zero Data Tracking",
+            text = stringResource(R.string.settings_about, BuildConfig.VERSION_NAME),
             style = MaterialTheme.typography.bodySmall,
             textAlign = TextAlign.Center,
             color = HighContrastGray,
