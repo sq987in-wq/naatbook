@@ -27,6 +27,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -225,10 +227,10 @@ fun NaatApp(viewModel: NaatViewModel) {
                 if (showDiscardConfirmation) {
                     AlertDialog(
                         onDismissRequest = { showDiscardConfirmation = false },
-                        title = { Text("Discard unsaved entry?") },
+                        title = { Text(stringResource(R.string.discard_title)) },
                         text = {
                             Text(
-                                "Your unsaved text and newly recorded or attached audio will be discarded."
+                                stringResource(R.string.discard_message)
                             )
                         },
                         confirmButton = {
@@ -237,11 +239,11 @@ fun NaatApp(viewModel: NaatViewModel) {
                                     showDiscardConfirmation = false
                                     viewModel.setShowAddModal(false)
                                 }
-                            ) { Text("Discard") }
+                            ) { Text(stringResource(R.string.common_discard)) }
                         },
                         dismissButton = {
                             TextButton(onClick = { showDiscardConfirmation = false }) {
-                                Text("Keep editing")
+                                Text(stringResource(R.string.discard_keep_editing))
                             }
                         }
                     )

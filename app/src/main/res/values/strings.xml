@@ -1,3 +1,136 @@
 <resources>
     <string name="app_name">NaatBook</string>
+
+    <!-- Common -->
+    <string name="common_pause">Pause</string>
+    <string name="common_play">Play</string>
+    <string name="common_delete">Delete</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_discard">Discard</string>
+    <string name="common_edit_entry">Edit entry</string>
+    <string name="common_database_error">database error</string>
+
+    <!-- Settings -->
+    <string name="settings_title">App Settings</string>
+    <string name="settings_theme_title">App Theme</string>
+    <string name="settings_theme_system">Match System Settings</string>
+    <string name="settings_theme_white">Total White Mode</string>
+    <string name="settings_theme_black">Total Black Mode</string>
+    <string name="settings_typography_title">Typography Adjustment</string>
+    <string name="settings_font_size_label">Lyrics Default Text Size: %1$d sp</string>
+    <string name="settings_backup_title">Privacy &amp; Local Database Backups</string>
+    <string name="settings_backup_description">All database records and audio assets are saved strictly locally. Safeguard your work below.</string>
+    <string name="settings_export_cd">Export</string>
+    <string name="settings_export_zip">Export ZIP</string>
+    <string name="settings_import_cd">Import</string>
+    <string name="settings_import_zip">Import ZIP</string>
+    <string name="settings_about">NaatBook %1$s\n100%% Offline | Zero Data Tracking</string>
+
+    <!-- Reader -->
+    <string name="reader_tap_hint">Tap once to show controls</string>
+    <string name="reader_close_cd">Close Reader</string>
+    <string name="reader_poet">Poet: %1$s</string>
+    <string name="reader_unknown_poet">Unknown Poet</string>
+    <string name="reader_favorite_cd">Toggle favorite</string>
+    <string name="reader_immersive_enter_cd">Enter full screen reader</string>
+    <string name="reader_immersive_exit_cd">Exit full screen reader</string>
+    <string name="reader_font_size_cd">Font size</string>
+    <string name="reader_font_label">Font:</string>
+    <string name="reader_autoscroll_on">Scrolling</string>
+    <string name="reader_autoscroll_off">AutoScroll</string>
+    <string name="reader_tap_label">Show or hide reader controls</string>
+    <string name="reader_no_lyrics">No written lyrics provided.\nReady to recite with attached media!</string>
+    <string name="reader_voice_note">Voice Note</string>
+    <string name="reader_linked_audio">Linked Audio</string>
+
+    <!-- Library -->
+    <string name="library_search_cd">Search icon</string>
+    <string name="library_search_hint">Search Naats, Poets, Lyrics...</string>
+    <string name="library_voice_prompt">Speak Naat keyword...</string>
+    <string name="library_stt_unsupported">Speech-to-Text not supported or offline</string>
+    <string name="library_voice_search_cd">Voice search</string>
+    <string name="library_folders_title">LIBRARY FOLDERS</string>
+    <string name="library_favorites_label">Favorites</string>
+    <string name="library_recent_title">RECENT NOTEBOOKS</string>
+    <string name="library_empty_folders">No entries in folders yet.</string>
+    <string name="library_favorites_query_title">FAVORITES · \"%1$s\"</string>
+    <string name="library_favorites_title">FAVORITES</string>
+    <string name="library_results_title">RESULTS FOR \"%1$s\"</string>
+    <string name="library_empty_favorites">No favorites yet.\nStar any entry with the heart icon to see it here.</string>
+    <string name="library_empty_search">No matches found.\nTry a different title, poet, or lyric phrase.</string>
+    <string name="library_back_cd">Back to folders</string>
+    <string name="library_empty_folder">No entries in this folder yet.\nTap (+) below to add your first entry!</string>
+    <string name="library_delete_title">Delete this entry?</string>
+    <string name="library_deleting">Deleting…</string>
+    <string name="library_by_poet">By %1$s</string>
+    <string name="library_recorded_cd">Recorded Audio Note Available</string>
+    <string name="library_linked_cd">Linked MP3 Available</string>
+    <string name="library_favorite_toggle_cd">Favorite toggle</string>
+    <string name="library_delete_cd">Delete entry</string>
+
+    <!-- Editor -->
+    <string name="editor_title_edit">Edit Notebook Entry</string>
+    <string name="editor_title_add">Add New Notebook Entry</string>
+    <string name="editor_close_cd">Close modal</string>
+    <string name="editor_title_label">Title (Required)</string>
+    <string name="editor_poet_label">Poet Name (Optional)</string>
+    <string name="editor_folder_label">Folder Location</string>
+    <string name="editor_lyrics_label">Lyrics</string>
+    <string name="editor_lyrics_hint">Add lyrics here...</string>
+    <string name="editor_dictate_prompt">Dictate the kalam...</string>
+    <string name="editor_stt_unsupported">Speech-to-Text not supported</string>
+    <string name="editor_dictate_cd">Dictate lyrics</string>
+    <string name="editor_attach_success">Audio file attached successfully!</string>
+    <string name="editor_attach_failed">Failed to copy audio attachment</string>
+    <string name="editor_dual_audio_title">Dual-Audio Attachments</string>
+    <string name="editor_recorder_title">In-App Voice Recorder</string>
+    <string name="editor_link_title">Link External MP3 / M4A File</string>
+    <string name="editor_attaching">Attaching...</string>
+    <string name="editor_browse">Browse Local Storage</string>
+    <string name="editor_remove_linked_cd">Remove linked file</string>
+    <string name="editor_current_voice_note">Current voice note</string>
+    <string name="editor_current_linked_audio">Current linked audio</string>
+    <string name="editor_remove_attachment_cd">Remove attachment</string>
+    <string name="editor_mic_permission">Microphone permission is required</string>
+    <string name="editor_resume">Resume</string>
+    <string name="editor_finish">Finish</string>
+    <string name="editor_tap_to_record">Tap to Record</string>
+    <string name="editor_recording_ready">Recording ready: %1$s</string>
+    <string name="editor_rerecord_cd">Re-record</string>
+    <string name="editor_title_required">Please enter a valid notebook title</string>
+    <string name="editor_saving">Saving…</string>
+    <string name="editor_save_changes">Save Changes</string>
+    <string name="editor_save_entry">Save Entry</string>
+
+    <!-- Navigation / components -->
+    <string name="nav_library">LIBRARY</string>
+    <string name="nav_add_entry_cd">Add new entry</string>
+    <string name="nav_settings">SETTINGS</string>
+    <string name="player_preview_pause_cd">Pause preview</string>
+    <string name="player_preview_play_cd">Play preview</string>
+    <string name="player_preview_label">Preview</string>
+
+    <!-- Discard dialog -->
+    <string name="discard_title">Discard unsaved entry?</string>
+    <string name="discard_message">Your unsaved text and newly recorded or attached audio will be discarded.</string>
+    <string name="discard_keep_editing">Keep editing</string>
+
+    <!-- Status / toast messages -->
+    <string name="status_recording_start_failed">Unable to start recording</string>
+    <string name="status_recording_start_failed_detail">Unable to start recording: %1$s</string>
+    <string name="status_entry_saved">Notebook Entry Saved!</string>
+    <string name="status_entry_updated">Entry Updated!</string>
+    <string name="status_save_failed">Save failed: %1$s</string>
+    <string name="status_entry_deleted">Entry deleted</string>
+    <string name="status_entry_missing">Entry no longer exists</string>
+    <string name="status_delete_failed">Delete failed: %1$s</string>
+    <string name="status_favorite_failed">Could not update favorite</string>
+    <string name="status_entry_lookup_failed">Unable to open entry</string>
+    <string name="status_open_playing_failed">Unable to open the playing entry: %1$s</string>
+    <string name="status_exporting">Exporting backup, please wait...</string>
+    <string name="status_export_success">Library Backup Exported Successfully!</string>
+    <string name="status_export_failed">Export Failed: %1$s</string>
+    <string name="status_importing">Importing backup, please wait...</string>
+    <string name="status_import_success">Library Restored Successfully! Loaded %1$d entries.</string>
+    <string name="status_import_failed">Import Failed: %1$s</string>
 </resources>
