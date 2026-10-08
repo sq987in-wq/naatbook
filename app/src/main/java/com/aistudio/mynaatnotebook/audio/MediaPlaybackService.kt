@@ -120,7 +120,7 @@ class MediaPlaybackService : MediaSessionService() {
 
     private fun launchIntent(): PendingIntent {
         val intent = packageManager.getLaunchIntentForPackage(packageName)
-            ?: Intent(this, com.example.MainActivity::class.java)
+            ?: Intent(this, com.aistudio.mynaatnotebook.MainActivity::class.java)
         return PendingIntent.getActivity(
             this,
             0,
@@ -133,7 +133,7 @@ class MediaPlaybackService : MediaSessionService() {
         private const val TAG = "Media3Service"
         private const val CHANNEL_ID = "naatbook_playback"
         private const val NOTIFICATION_ID = 1001
-        private const val ACTION_PLAY_ENTRY = "com.example.audio.PLAY_ENTRY"
+        private const val ACTION_PLAY_ENTRY = "com.aistudio.mynaatnotebook.audio.PLAY_ENTRY"
         private const val EXTRA_REQUEST_TOKEN = "requestToken"
 
         fun playEntry(context: Context, requestToken: String) {
