@@ -55,7 +55,8 @@ import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.NastaliqFamily
 import com.example.ui.theme.HighContrastRed
 import com.example.ui.theme.HighContrastGray
-import com.example.viewmodel.NaatViewModel
+import com.example.viewmodel.BackupViewModel
+import com.example.viewmodel.SettingsViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
@@ -63,17 +64,20 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable
-fun SettingsScreen(viewModel: NaatViewModel) {
+fun SettingsScreen(
+    settingsViewModel: SettingsViewModel,
+    backupViewModel: BackupViewModel
+) {
     val context = LocalContext.current
-    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
-    val globalFontSize by viewModel.globalFontSize.collectAsStateWithLifecycle()
+    val themeMode by settingsViewModel.themeMode.collectAsStateWithLifecycle()
+    val globalFontSize by settingsViewModel.globalFontSize.collectAsStateWithLifecycle()
 
     // Create zip launcher
     val exportBackupLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/zip"),
         onResult = { uri ->
             if (uri != null) {
-                viewModel.backupNotebook(uri)
+                backupViewModel.backupNotebook(uri)
             }
         }
     )
@@ -83,7 +87,7 @@ fun SettingsScreen(viewModel: NaatViewModel) {
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             if (uri != null) {
-                viewModel.restoreNotebook(uri)
+                backupViewModel.restoreNotebook(uri)
             }
         }
     )
@@ -125,13 +129,13 @@ fun SettingsScreen(viewModel: NaatViewModel) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { viewModel.setThemeMode(mode) }
+                            .clickable { settingsViewModel.setThemeMode(mode) }
                             .padding(vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
                             selected = themeMode == mode,
-                            onClick = { viewModel.setThemeMode(mode) }
+                            onClick = { settingsViewModel.setThemeMode(mode) }
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(text = title, fontWeight = FontWeight.SemiBold)
@@ -171,7 +175,7 @@ fun SettingsScreen(viewModel: NaatViewModel) {
                 Slider(
                     value = pendingFontSize,
                     onValueChange = { pendingFontSize = it },
-                    onValueChangeFinished = { viewModel.setGlobalFontSize(pendingFontSize) },
+                    onValueChangeFinished = { settingsViewModel.setGlobalFontSize(pendingFontSize) },
                     valueRange = 12f..36f,
                     steps = 23, // 24 steps total = 12..36 sp in exact 1-sp increments
                     modifier = Modifier.testTag("global_font_slider")

@@ -26,84 +26,15 @@ import javax.inject.Inject
 
 private const val DRAFT_PERSIST_DEBOUNCE_MS = 350L
 
-/** Serializable editor values only; audio payloads remain in app-owned files. */
-data class EditorMetadataDraft(
-    val editingId: Int?,
-    val title: String,
-    val poet: String,
-    val category: String,
-    val lyrics: String
-)
-
-data class EditorAttachmentDraft(
-    val existingAudioRemoved: Boolean,
-    val existingAudioType: String,
-    val existingAudioPath: String?,
-    val existingSecondaryAudioRemoved: Boolean,
-    val existingSecondaryAudioType: String,
-    val existingSecondaryAudioPath: String?,
-    val newAttachmentPath: String?,
-    val newAttachmentName: String?,
-    val finishedRecordingPath: String?
-)
-
-data class EditorDraft(
-    val active: Boolean = false,
-    val editingId: Int? = null,
-    val title: String = "",
-    val poet: String = "",
-    val category: String = NaatCategories.DEFAULT,
-    val lyrics: String = "",
-    val existingAudioRemoved: Boolean = false,
-    val existingAudioType: String = "none",
-    val existingAudioPath: String? = null,
-    val existingSecondaryAudioRemoved: Boolean = false,
-    val existingSecondaryAudioType: String = "none",
-    val existingSecondaryAudioPath: String? = null,
-    val existingFavorite: Boolean = false,
-    val existingCreatedAt: Long = 0L,
-    val newAttachmentPath: String? = null,
-    val newAttachmentName: String? = null,
-    val finishedRecordingPath: String? = null
-)
-
-/** True only when abandoning this draft would lose user-entered or user-attached work. */
-internal fun EditorDraft.hasUnsavedChanges(original: NaatEntity?): Boolean {
-    if (!active) return false
-
-    if (editingId == null) {
-        return title.isNotBlank() ||
-            poet.isNotBlank() ||
-            lyrics.isNotBlank() ||
-            category != NaatCategories.DEFAULT ||
-            newAttachmentPath != null ||
-            finishedRecordingPath != null
-    }
-
-    // If process restoration could not rehydrate the original row, be conservative:
-    // asking before discard is always safer than silently losing a recovered draft.
-    if (original == null || original.id != editingId) return true
-
-    return title != original.title ||
-        poet != original.poet.orEmpty() ||
-        NaatCategories.normalize(category) != NaatCategories.normalize(original.category) ||
-        lyrics != original.lyrics.orEmpty() ||
-        existingAudioRemoved ||
-        existingSecondaryAudioRemoved ||
-        newAttachmentPath != null ||
-        finishedRecordingPath != null
-}
-
 @HiltViewModel
 class NaatViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val savedStateHandle: SavedStateHandle,
     private val repository: NaatRepository,
-    private val backupManager: BackupManager,
     private val audioFiles: AudioFileLifecycleCoordinator,
     private val audioRecorder: AudioRecorder,
     val playbackController: PlaybackController,
-    private val settingsStore: SettingsStore
+    private val statusReporter: StatusReporter
 ) : ViewModel() {
 
     private val draftStore = EditorDraftStore(savedStateHandle)
@@ -239,19 +170,6 @@ class NaatViewModel @Inject constructor(
         _searchQuery.value = ""
     }
 
-    // App Preferences (defaults render instantly; stored values land on first emit)
-    private val _themeMode = MutableStateFlow(NaatViewModelDefaults.DEFAULT_THEME_MODE)
-    val themeMode: StateFlow<String> = _themeMode.asStateFlow()
-
-    private val _globalFontSize = MutableStateFlow(NaatViewModelDefaults.DEFAULT_FONT_SIZE)
-    val globalFontSize: StateFlow<Float> = _globalFontSize.asStateFlow()
-
-    init {
-        // DataStore emits current settings once, then on every change
-        viewModelScope.launch { settingsStore.themeMode.collect { _themeMode.value = it } }
-        viewModelScope.launch { settingsStore.fontSize.collect { _globalFontSize.value = it } }
-    }
-
     // Lightweight Library state: lyrics are never materialized for cards/folder counts.
     val allSummaries: StateFlow<List<NaatSummary>> = repository.allSummaries
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -356,9 +274,11 @@ class NaatViewModel @Inject constructor(
         }
     }
 
-    // Backup & Restore status notifications
-    private val _statusMessage = MutableStateFlow<String?>(null)
-    val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
+    // Status/toast messages are shared process-wide via StatusReporter so every
+    // feature ViewModel reports through the single channel the UI already collects.
+    val statusMessage: StateFlow<String?> = statusReporter.message
+
+    fun clearStatusMessage() = statusReporter.clear()
 
     private fun persistDraft(draft: EditorDraft, immediate: Boolean = false) {
         _editorDraft.value = draft
@@ -494,7 +414,7 @@ class NaatViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 Log.e("NaatViewModel", "Unable to open now-playing entry", e)
-                _statusMessage.value = "Unable to open the playing entry: ${e.localizedMessage ?: "database error"}"
+                statusReporter.show("Unable to open the playing entry: ${e.localizedMessage ?: "database error"}")
                 onResolved(false) // preserve playback when lookup itself failed
             } finally {
                 _isOpeningNowPlaying.value = false
@@ -610,12 +530,12 @@ class NaatViewModel @Inject constructor(
                             persistDraft(_editorDraft.value.copy(finishedRecordingPath = null))
                             stopRecordingMeter()
                         }
-                        _statusMessage.value = "Unable to start recording"
+                        statusReporter.show("Unable to start recording")
                     }
                 }
             } catch (error: Exception) {
                 Log.e("NaatViewModel", "Unable to start recording", error)
-                _statusMessage.value = "Unable to start recording: ${error.localizedMessage ?: "storage error"}"
+                statusReporter.show("Unable to start recording: ${error.localizedMessage ?: "storage error"}")
             } finally {
                 recordingGate.finish()
             }
@@ -895,7 +815,7 @@ class NaatViewModel @Inject constructor(
                         _showAddModal.value = false
                         _recordingState.value = RecordingState.IDLE
                         if (_selectedNaat.value?.id == saved.id) _selectedNaat.value = saved
-                        _statusMessage.value = if (draft.editingId == null) {
+                        statusReporter.show(if (draft.editingId == null) {)
                             "Notebook Entry Saved!"
                         } else {
                             "Entry Updated!"
@@ -904,7 +824,7 @@ class NaatViewModel @Inject constructor(
                 }
             } catch (error: Exception) {
                 Log.e("NaatViewModel", "Save failed", error)
-                _statusMessage.value = "Save failed: ${error.localizedMessage ?: "database error"}"
+                statusReporter.show("Save failed: ${error.localizedMessage ?: "database error"}")
                 // Keep the modal and draft files intact so the user can retry.
             } finally {
                 _isSaving.value = false
@@ -925,7 +845,7 @@ class NaatViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 Log.e("NaatViewModel", "Favorite toggle failed", e)
-                _statusMessage.value = "Could not update favorite"
+                statusReporter.show("Could not update favorite")
             }
         }
     }
@@ -938,12 +858,12 @@ class NaatViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 repository.getNaatById(id)?.let(onLoaded) ?: run {
-                    _statusMessage.value = "Entry no longer exists"
+                    statusReporter.show("Entry no longer exists")
                     onFailure()
                 }
             } catch (error: Exception) {
                 Log.e("NaatViewModel", "Entry lookup failed", error)
-                _statusMessage.value = "Unable to open entry"
+                statusReporter.show("Unable to open entry")
                 onFailure()
             }
         }
@@ -981,60 +901,19 @@ class NaatViewModel @Inject constructor(
                 }
                 withContext(Dispatchers.Main.immediate) {
                     if (deleted == null) {
-                        _statusMessage.value = "Entry no longer exists"
+                        statusReporter.show("Entry no longer exists")
                     } else {
                         if (_selectedNaat.value?.id == deleted.id) _selectedNaat.value = null
-                        _statusMessage.value = "Entry deleted"
+                        statusReporter.show("Entry deleted")
                         onSuccess()
                     }
                 }
             } catch (error: Exception) {
                 Log.e("NaatViewModel", "Delete failed", error)
-                _statusMessage.value = "Delete failed: ${error.localizedMessage ?: "database error"}"
+                statusReporter.show("Delete failed: ${error.localizedMessage ?: "database error"}")
             } finally {
                 _isDeleting.value = false
                 deleteGate.finish()
-            }
-        }
-    }
-
-    // --- Preferences configuration (suspend writes -> exactly one DataStore
-    // transaction per committed user action, never per slider tick) ---
-    fun setThemeMode(mode: String) {
-        _themeMode.value = mode
-        viewModelScope.launch { settingsStore.setThemeMode(mode) }
-    }
-
-    fun setGlobalFontSize(size: Float) {
-        _globalFontSize.value = size
-        viewModelScope.launch { settingsStore.setFontSize(size) }
-    }
-
-    fun clearStatusMessage() {
-        _statusMessage.value = null
-    }
-
-    // --- Backup & Restore ---
-    fun backupNotebook(uri: Uri) {
-        viewModelScope.launch {
-            _statusMessage.value = "Exporting backup, please wait..."
-            val result = backupManager.exportBackup(uri)
-            result.onSuccess {
-                _statusMessage.value = "Library Backup Exported Successfully!"
-            }.onFailure {
-                _statusMessage.value = "Export Failed: ${it.localizedMessage}"
-            }
-        }
-    }
-
-    fun restoreNotebook(uri: Uri) {
-        viewModelScope.launch {
-            _statusMessage.value = "Importing backup, please wait..."
-            val result = backupManager.importBackup(uri)
-            result.onSuccess { count ->
-                _statusMessage.value = "Library Restored Successfully! Loaded $count entries."
-            }.onFailure {
-                _statusMessage.value = "Import Failed: ${it.localizedMessage}"
             }
         }
     }
