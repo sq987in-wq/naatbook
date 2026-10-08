@@ -303,7 +303,9 @@ private fun EditorAudioSection(viewModel: NaatViewModel) {
                 Text(stringResource(R.string.editor_link_title), fontWeight = FontWeight.SemiBold)
                 Button(
                     onClick = { audioPicker.launch("audio/*") },
-                    enabled = !isAttaching,
+                    // Disable while attaching or when a new file is already picked
+                    // (prevents silently replacing the pending attachment).
+                    enabled = !isAttaching && attachments.newAttachmentPath == null,
                     modifier = Modifier.testTag("link_external_file_btn")
                 ) {
                     if (isAttaching) {
