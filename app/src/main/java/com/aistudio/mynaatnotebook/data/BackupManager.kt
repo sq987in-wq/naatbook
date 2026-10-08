@@ -300,6 +300,9 @@ class BackupManager @Inject constructor(
             }
         }
 
+        if (staged.entries.length() > MAX_ENTRIES) {
+            throw IOException("Backup manifest has too many entries (>${MAX_ENTRIES})")
+        }
         val entries = buildList {
             for (index in 0 until staged.entries.length()) {
                 val obj = staged.entries.getJSONObject(index)
