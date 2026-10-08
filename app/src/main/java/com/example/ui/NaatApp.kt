@@ -26,6 +26,8 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import android.content.Context
+import com.example.viewmodel.StatusMessage
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.res.stringResource
 import com.example.R
@@ -87,7 +89,7 @@ fun NaatApp(
 
     LaunchedEffect(statusMessage) {
         statusMessage?.let {
-            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            Toast.makeText(context, it.resolve(context), Toast.LENGTH_LONG).show()
             viewModel.clearStatusMessage()
         }
     }
@@ -288,4 +290,16 @@ private fun AppBackHandler(
             else -> viewModel.setSearchQuery("")
         }
     }
+}
+
+/**
+ * Resolves a [StatusMessage] to a display string using [Context.getString].
+ * Nested [StatusMessage] arguments (e.g. error fallbacks) are resolved recursively.
+ */
+private fun StatusMessage.resolve(context: Context): String = when (this) {
+    is StatusMessage.Text -> text
+    is StatusMessage.Res -> context.getString(
+        resId,
+        *args.map { if (it is StatusMessage) it.resolve(context) else it }.toTypedArray()
+    )
 }
