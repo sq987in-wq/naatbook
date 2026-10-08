@@ -247,10 +247,10 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
                                     RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                                     RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
                                 )
-                                putExtra(RecognizerIntent.EXTRA_PROMPT, context.getString(R.string.editor_dictate_prompt))
+                                putExtra(RecognizerIntent.EXTRA_PROMPT, "Dictate the kalam...")
                             })
                         } catch (_: Exception) {
-                            Toast.makeText(context, context.getString(R.string.editor_stt_unsupported), Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Speech-to-Text not supported", Toast.LENGTH_SHORT).show()
                         }
                     },
                     modifier = Modifier.testTag("lyrics_dictate_mic")
@@ -274,7 +274,7 @@ private fun EditorAudioSection(viewModel: NaatViewModel) {
             viewModel.attachLocalFile(uri) { success ->
                 Toast.makeText(
                     context,
-                    if (success) context.getString(R.string.editor_attach_success) else context.getString(R.string.editor_attach_failed),
+                    if (success) "Audio file attached successfully!" else "Failed to copy audio attachment",
                     Toast.LENGTH_SHORT
                 ).show()
             }
