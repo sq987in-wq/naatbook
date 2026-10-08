@@ -815,11 +815,13 @@ class NaatViewModel @Inject constructor(
                         _showAddModal.value = false
                         _recordingState.value = RecordingState.IDLE
                         if (_selectedNaat.value?.id == saved.id) _selectedNaat.value = saved
-                        statusReporter.show(if (draft.editingId == null) {)
-                            "Notebook Entry Saved!"
-                        } else {
-                            "Entry Updated!"
-                        }
+                        statusReporter.show(
+                            if (draft.editingId == null) {
+                                "Notebook Entry Saved!"
+                            } else {
+                                "Entry Updated!"
+                            }
+                        )
                     }
                 }
             } catch (error: Exception) {
