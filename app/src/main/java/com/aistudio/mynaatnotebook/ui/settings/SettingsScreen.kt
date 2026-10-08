@@ -73,6 +73,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     val themeMode by settingsViewModel.themeMode.collectAsStateWithLifecycle()
     val globalFontSize by settingsViewModel.globalFontSize.collectAsStateWithLifecycle()
+    val backupProgress by backupViewModel.progress.collectAsStateWithLifecycle()
 
     // Create zip launcher
     val exportBackupLauncher = rememberLauncherForActivityResult(
@@ -274,6 +275,27 @@ fun SettingsScreen(
                 Icon(Icons.Default.Upload, contentDescription = stringResource(R.string.settings_import_cd))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(stringResource(R.string.settings_import_zip), fontSize = 12.sp)
+            }
+        }
+
+        // Backup progress indicator
+        backupProgress?.let { progress ->
+            Spacer(modifier = Modifier.height(12.dp))
+            Column(modifier = Modifier.fillMaxWidth()) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .testTag("backup_progress_bar"),
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${(progress * 100).toInt()}%",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = HighContrastGray,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
             }
         }
 

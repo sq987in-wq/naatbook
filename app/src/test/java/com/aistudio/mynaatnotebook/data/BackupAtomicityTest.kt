@@ -103,7 +103,7 @@ class BackupAtomicityTest {
             mapOf(voicePath to voice, linkedPath to linked)
         )
 
-        assertEquals(1, manager.importBackup(Uri.fromFile(archive)).getOrThrow())
+        assertEquals(1, manager.importBackup(Uri.fromFile(archive)).getOrThrow().imported)
         val restored = repository.allNaats.first().single()
         assertEquals("recorded", restored.audioType)
         assertEquals("local_file", restored.secondaryAudioType)
@@ -133,7 +133,7 @@ class BackupAtomicityTest {
         val result = manager.importBackup(Uri.fromFile(archive))
         val restored = repository.allNaats.first().single()
 
-        assertEquals(1, result.getOrThrow())
+        assertEquals(1, result.getOrThrow().imported)
         assertEquals("recorded", restored.audioType)
         assertTrue(restored.audioPath!!.startsWith(File(context.filesDir, "audio").absolutePath))
         assertTrue(File(restored.audioPath!!).isFile)
@@ -157,7 +157,7 @@ class BackupAtomicityTest {
         val result = manager.importBackup(Uri.fromFile(archive))
         val restored = repository.allNaats.first()
 
-        assertEquals(2, result.getOrThrow())
+        assertEquals(2, result.getOrThrow().imported)
         assertEquals(2, restored.size)
         assertEquals(1, restored.mapNotNull { it.audioPath }.distinct().size)
         assertEquals(1, File(context.filesDir, "audio").listFiles()?.size)

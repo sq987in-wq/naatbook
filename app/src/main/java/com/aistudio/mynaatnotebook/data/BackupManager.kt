@@ -37,6 +37,9 @@ internal fun safeBackupDestination(baseDir: File, entryName: String): File? {
     return destination.takeIf { it.canonicalFile.path.startsWith(basePath) }
 }
 
+/** Result of an import: how many entries were added vs skipped as duplicates. */
+data class ImportResult(val imported: Int, val skipped: Int)
+
 /** User-controlled ZIP import/export for the offline notebook. */
 @Singleton
 class BackupManager @Inject constructor(
@@ -69,9 +72,15 @@ class BackupManager @Inject constructor(
         val audioByArchivePath: Map<String, File>
     )
     private data class PlannedAudio(val staged: File, val destination: File, val digest: String)
+    private data class PlannedEntry(
+        val entity: NaatEntity,
+        val signature: String,
+        val primaryArchivePath: String?,
+        val secondaryArchivePath: String?
+    )
     private data class RestorePlan(
-        val entries: List<NaatEntity>,
-        val audio: Collection<PlannedAudio>
+        val entries: List<PlannedEntry>,
+        val audioByArchivePath: Map<String, PlannedAudio>
     )
 
     private class ExtractionBudget {
@@ -88,12 +97,17 @@ class BackupManager @Inject constructor(
      * Build and fsync the complete archive before opening the user destination.
      * A hashing/ZIP failure therefore cannot truncate a previously valid backup.
      */
-    suspend fun exportBackup(outputUri: Uri): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun exportBackup(
+        outputUri: Uri,
+        onProgress: (Float) -> Unit = {}
+    ): Result<String> = withContext(Dispatchers.IO) {
         audioFiles.exclusive {
             val stagedZip = File(context.cacheDir, "backup-export-${UUID.randomUUID()}.zip")
         runCatching {
+            onProgress(0.05f)
             val naats = repository.allNaats.first()
-            val audioIndex = buildAudioIndex(naats)
+            onProgress(0.15f)
+            val audioIndex = buildAudioIndex(naats) { p -> onProgress(0.15f + p * 0.15f) }
             val entries = JSONArray()
             naats.forEach { naat ->
                 entries.put(JSONObject().apply {
@@ -118,6 +132,7 @@ class BackupManager @Inject constructor(
                 put("formatVersion", FORMAT_VERSION)
                 put("entries", entries)
             }
+            onProgress(0.35f)
 
             FileOutputStream(stagedZip).use { fileOutput ->
                 val buffered = BufferedOutputStream(fileOutput)
@@ -126,10 +141,12 @@ class BackupManager @Inject constructor(
                     zip.putNextEntry(ZipEntry(DATA_ENTRY))
                     zip.write(root.toString(4).toByteArray(Charsets.UTF_8))
                     zip.closeEntry()
-                    audioIndex.uniqueFiles.forEach { packed ->
+                    val audioList = audioIndex.uniqueFiles.toList()
+                    audioList.forEachIndexed { index, packed ->
                         zip.putNextEntry(ZipEntry(packed.relativePath))
                         FileInputStream(packed.source).use { it.copyTo(zip, BUFFER_SIZE) }
                         zip.closeEntry()
+                        onProgress(0.35f + (index + 1f) / audioList.size.coerceAtLeast(1) * 0.45f)
                     }
                     zip.finish()
                     zip.flush()
@@ -139,6 +156,7 @@ class BackupManager @Inject constructor(
                     zip.close()
                 }
             }
+            onProgress(0.85f)
 
             val descriptor = context.contentResolver.openFileDescriptor(outputUri, "w")
                 ?: throw IOException("Could not open output stream")
@@ -150,13 +168,17 @@ class BackupManager @Inject constructor(
                     }
                 }
             }
+            onProgress(1f)
             "Backup exported successfully"
             }.onFailure { Log.e("BackupManager", "Export failed", it) }
                 .also { stagedZip.delete() }
         }
     }
 
-    private fun buildAudioIndex(naats: List<NaatEntity>): ExportAudioIndex {
+    private fun buildAudioIndex(
+        naats: List<NaatEntity>,
+        onProgress: (Float) -> Unit = {}
+    ): ExportAudioIndex {
         val primary = mutableMapOf<Int, String>()
         val secondary = mutableMapOf<Int, String>()
         val relativeByCanonicalSource = mutableMapOf<String, String>()
@@ -176,9 +198,10 @@ class BackupManager @Inject constructor(
             }
         }
 
-        naats.forEach { naat ->
+        naats.forEachIndexed { index, naat ->
             pack(naat.audioPath)?.let { primary[naat.id] = it }
             pack(naat.secondaryAudioPath)?.let { secondary[naat.id] = it }
+            onProgress((index + 1f) / naats.size.coerceAtLeast(1))
         }
         return ExportAudioIndex(primary, secondary, packedByDigest.values)
     }
@@ -203,20 +226,84 @@ class BackupManager @Inject constructor(
      * one Room transaction. Any pre-commit failure leaves the notebook untouched; a database
      * failure rolls back only files created by this attempt.
      */
-    suspend fun importBackup(inputUri: Uri): Result<Int> = withContext(Dispatchers.IO) {
+    suspend fun importBackup(
+        inputUri: Uri,
+        onProgress: (Float) -> Unit = {}
+    ): Result<ImportResult> = withContext(Dispatchers.IO) {
         audioFiles.exclusive {
             val stagingDir = File(context.cacheDir, "backup-import-${UUID.randomUUID()}")
         runCatching {
             if (!stagingDir.mkdirs()) throw IOException("Could not create import staging area")
-            val staged = extractAndValidateArchive(inputUri, stagingDir)
+            onProgress(0.05f)
+            val staged = extractAndValidateArchive(inputUri, stagingDir) { p ->
+                onProgress(0.05f + p * 0.35f)
+            }
+            onProgress(0.45f)
             val plan = buildRestorePlan(staged)
-            commitRestorePlan(plan)
+            onProgress(0.55f)
+            // Smart import: skip entries that already exist (same content).
+            val existingSignatures = loadExistingSignatures { p ->
+                onProgress(0.55f + p * 0.1f)
+            }
+            val newEntries = plan.entries.filter { it.signature !in existingSignatures }
+            val skipped = plan.entries.size - newEntries.size
+            onProgress(0.68f)
+            val neededArchivePaths = newEntries.flatMap {
+                listOfNotNull(it.primaryArchivePath, it.secondaryArchivePath)
+            }.toSet()
+            val neededAudio = plan.audioByArchivePath.filterKeys { it in neededArchivePaths }
+            val committed = commitRestorePlan(newEntries.map { it.entity }, neededAudio.values) { p ->
+                onProgress(0.68f + p * 0.32f)
+            }
+            onProgress(1f)
+            ImportResult(committed, skipped)
             }.onFailure { Log.e("BackupManager", "Import failed", it) }
                 .also { stagingDir.deleteRecursively() }
         }
     }
 
-    private fun extractAndValidateArchive(inputUri: Uri, stagingDir: File): StagedArchive {
+    /** Signature for duplicate detection: normalized content + audio fingerprints. */
+    private fun entrySignature(
+        title: String,
+        poet: String?,
+        category: String,
+        lyrics: String?,
+        primaryDigest: String?,
+        secondaryDigest: String?
+    ): String = listOf(
+        title.trim().lowercase(),
+        poet?.trim()?.lowercase().orEmpty(),
+        category,
+        lyrics?.trim().orEmpty(),
+        primaryDigest.orEmpty(),
+        secondaryDigest.orEmpty()
+    ).joinToString("|")
+
+    private suspend fun loadExistingSignatures(onProgress: (Float) -> Unit = {}): Set<String> {
+        val existing = repository.allNaats.first()
+        return existing.mapIndexed { index, entry ->
+            entrySignature(
+                entry.title,
+                entry.poet,
+                entry.category,
+                entry.lyrics,
+                entry.audioPath?.let { path ->
+                    File(path).takeIf { it.isFile }?.sha256()
+                },
+                entry.secondaryAudioPath?.let { path ->
+                    File(path).takeIf { it.isFile }?.sha256()
+                }
+            ).also {
+                onProgress((index + 1f) / existing.size.coerceAtLeast(1))
+            }
+        }.toSet()
+    }
+
+    private fun extractAndValidateArchive(
+        inputUri: Uri,
+        stagingDir: File,
+        onProgress: (Float) -> Unit = {}
+    ): StagedArchive {
         val input = context.contentResolver.openInputStream(inputUri)
             ?: throw IOException("Could not open input stream")
         val budget = ExtractionBudget()
@@ -274,7 +361,7 @@ class BackupManager @Inject constructor(
     private fun buildRestorePlan(staged: StagedArchive): RestorePlan {
         val plannedAudioByArchivePath = mutableMapOf<String, PlannedAudio>()
 
-        fun planAudio(rawPath: String?, entryNumber: Int): PlannedAudio? {
+        fun planAudio(rawPath: String?, entryNumber: Int): Pair<PlannedAudio?, String?> {
             val archivePath = when (staged.formatVersion) {
                 FORMAT_VERSION -> rawPath?.also {
                     if (V2_AUDIO_NAME.matchEntire(it) == null) {
@@ -288,7 +375,7 @@ class BackupManager @Inject constructor(
             if (staged.formatVersion == FORMAT_VERSION && archivePath != null && source == null) {
                 throw IOException("Missing audio payload for entry $entryNumber")
             }
-            return if (source == null || archivePath == null) null else {
+            val planned = if (source == null || archivePath == null) null else {
                 plannedAudioByArchivePath.getOrPut(archivePath) {
                     val digest = source.sha256()
                     PlannedAudio(
@@ -298,6 +385,7 @@ class BackupManager @Inject constructor(
                     )
                 }
             }
+            return planned to archivePath
         }
 
         if (staged.entries.length() > MAX_ENTRIES) {
@@ -308,18 +396,21 @@ class BackupManager @Inject constructor(
                 val obj = staged.entries.getJSONObject(index)
                 val title = obj.getString("title")
                 if (title.isBlank()) throw IOException("Backup entry ${index + 1} has a blank title")
-                val primary = planAudio(obj.nullableString("audioPath"), index + 1)
-                val secondary = if (staged.formatVersion == FORMAT_VERSION) {
+                val (primary, primaryArchivePath) = planAudio(obj.nullableString("audioPath"), index + 1)
+                val (secondary, secondaryArchivePath) = if (staged.formatVersion == FORMAT_VERSION) {
                     planAudio(obj.nullableString("secondaryAudioPath"), index + 1)
-                } else null
+                } else null to null
+                val poet = obj.nullableString("poet")
+                val category = NaatCategories.normalize(obj.nullableString("category"))
+                val lyrics = obj.nullableString("lyrics")
                 val createdAt = obj.optLong("createdAt", System.currentTimeMillis())
                 // v2 backups predate updatedAt; creation time is their truthful fallback.
                 val updatedAt = obj.optLong("updatedAt", createdAt)
-                add(NaatEntity(
+                val entity = NaatEntity(
                     title = title,
-                    poet = obj.nullableString("poet"),
-                    category = NaatCategories.normalize(obj.nullableString("category")),
-                    lyrics = obj.nullableString("lyrics"),
+                    poet = poet,
+                    category = category,
+                    lyrics = lyrics,
                     audioType = if (primary == null) "none" else obj.optString("audioType", "none"),
                     audioPath = primary?.destination?.absolutePath,
                     isFavorite = obj.optBoolean("isFavorite", false),
@@ -328,45 +419,57 @@ class BackupManager @Inject constructor(
                     secondaryAudioType = if (secondary == null) "none"
                         else obj.optString("secondaryAudioType", "none"),
                     secondaryAudioPath = secondary?.destination?.absolutePath
-                ))
+                )
+                val signature = entrySignature(
+                    title, poet, category, lyrics,
+                    primary?.digest, secondary?.digest
+                )
+                add(PlannedEntry(entity, signature, primaryArchivePath, secondaryArchivePath))
             }
         }
-        return RestorePlan(entries, plannedAudioByArchivePath.values.distinctBy { it.destination.path })
+        return RestorePlan(entries, plannedAudioByArchivePath)
     }
 
-    private suspend fun commitRestorePlan(plan: RestorePlan): Int {
+    private suspend fun commitRestorePlan(
+        entities: List<NaatEntity>,
+        audio: Collection<PlannedAudio>,
+        onProgress: (Float) -> Unit = {}
+    ): Int {
         val createdFiles = mutableListOf<File>()
         try {
-            plan.audio.forEach { audio ->
-                val destination = audio.destination
+            val audioList = audio.toList()
+            audioList.forEachIndexed { index, planned ->
+                val destination = planned.destination
                 destination.parentFile?.mkdirs()
                 if (destination.exists()) {
-                    if (!destination.isFile || destination.sha256() != audio.digest) {
+                    if (!destination.isFile || destination.sha256() != planned.digest) {
                         throw IOException("Existing imported audio failed integrity check")
                     }
-                    return@forEach
-                }
-                val temporary = File(destination.parentFile, ".${destination.name}.${UUID.randomUUID()}.tmp")
-                try {
-                    FileInputStream(audio.staged).use { input ->
-                        FileOutputStream(temporary).use { output ->
-                            input.copyTo(output, BUFFER_SIZE)
-                            output.fd.sync()
+                } else {
+                    val temporary = File(destination.parentFile, ".${destination.name}.${UUID.randomUUID()}.tmp")
+                    try {
+                        FileInputStream(planned.staged).use { input ->
+                            FileOutputStream(temporary).use { output ->
+                                input.copyTo(output, BUFFER_SIZE)
+                                output.fd.sync()
+                            }
                         }
-                    }
-                    if (!temporary.renameTo(destination)) {
-                        if (!destination.isFile || destination.sha256() != audio.digest) {
-                            throw IOException("Could not commit imported audio")
+                        if (!temporary.renameTo(destination)) {
+                            if (!destination.isFile || destination.sha256() != planned.digest) {
+                                throw IOException("Could not commit imported audio")
+                            }
+                        } else {
+                            createdFiles += destination
                         }
-                    } else {
-                        createdFiles += destination
+                    } finally {
+                        temporary.delete()
                     }
-                } finally {
-                    temporary.delete()
                 }
+                onProgress((index + 1f) / audioList.size.coerceAtLeast(1) * 0.7f)
             }
-            repository.insertAll(plan.entries)
-            return plan.entries.size
+            repository.insertAll(entities)
+            onProgress(1f)
+            return entities.size
         } catch (error: Exception) {
             createdFiles.forEach { it.delete() }
             throw error
