@@ -232,8 +232,8 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
         OutlinedTextField(
             value = metadata.lyrics,
             onValueChange = { value -> viewModel.updateDraft { it.copy(lyrics = value) } },
-            label = { Text(stringResource(R.string.editor_lyrics_label)) },
-            placeholder = { Text(stringResource(R.string.editor_lyrics_hint)) },
+            label = { Text("Lyrics") },
+            placeholder = { Text("Add lyrics here...") },
             textStyle = LocalTextStyle.current.copy(
                 fontFamily = if (usesArabicScript(metadata.lyrics)) NastaliqFamily else FontFamily.Default,
                 lineHeight = if (usesArabicScript(metadata.lyrics)) 32.sp else LocalTextStyle.current.lineHeight
@@ -254,7 +254,7 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
                         }
                     },
                     modifier = Modifier.testTag("lyrics_dictate_mic")
-                ) { Icon(Icons.Default.Mic, contentDescription = stringResource(R.string.editor_dictate_cd), tint = HighContrastGray) }
+                ) { Icon(Icons.Default.Mic, contentDescription = "Dictate lyrics", tint = HighContrastGray) }
             },
             modifier = Modifier.fillMaxWidth().height(180.dp).testTag("add_naat_lyrics"),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
@@ -282,7 +282,7 @@ private fun EditorAudioSection(viewModel: NaatViewModel) {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(stringResource(R.string.editor_dual_audio_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text("Dual-Audio Attachments", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Card(
             modifier = Modifier.fillMaxWidth()
                 .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)),
@@ -292,10 +292,10 @@ private fun EditorAudioSection(viewModel: NaatViewModel) {
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 ExistingAttachments(attachments, activeRecordingFile != null, viewModel)
-                Text(stringResource(R.string.editor_recorder_title), fontWeight = FontWeight.SemiBold)
+                Text("In-App Voice Recorder", fontWeight = FontWeight.SemiBold)
                 RecorderControls(viewModel)
                 HorizontalDivider()
-                Text(stringResource(R.string.editor_link_title), fontWeight = FontWeight.SemiBold)
+                Text("Link External MP3 / M4A File", fontWeight = FontWeight.SemiBold)
                 Button(
                     onClick = { audioPicker.launch("audio/*") },
                     enabled = !isAttaching,
@@ -304,11 +304,11 @@ private fun EditorAudioSection(viewModel: NaatViewModel) {
                     if (isAttaching) {
                         CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.editor_attaching))
+                        Text("Attaching...")
                     } else {
                         Icon(Icons.Default.MusicNote, contentDescription = null)
                         Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.editor_browse))
+                        Text("Browse Local Storage")
                     }
                 }
                 attachments.newAttachmentPath?.let { path ->
