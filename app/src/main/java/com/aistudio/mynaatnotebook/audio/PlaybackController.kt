@@ -1,5 +1,9 @@
 package com.aistudio.mynaatnotebook.audio
 
+import com.aistudio.mynaatnotebook.R
+import com.aistudio.mynaatnotebook.viewmodel.StatusMessage
+import com.aistudio.mynaatnotebook.viewmodel.StatusReporter
+
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -25,7 +29,8 @@ data class NowPlaying(
 class PlaybackController @Inject constructor(
     @ApplicationContext private val context: Context,
     private val engine: Media3PlaybackEngine,
-    private val playbackRequests: PlaybackRequestRegistry
+    private val playbackRequests: PlaybackRequestRegistry,
+    private val statusReporter: StatusReporter
 ) {
     private val _nowPlaying = MutableStateFlow<NowPlaying?>(null)
     val nowPlaying: StateFlow<NowPlaying?> = _nowPlaying.asStateFlow()
@@ -95,6 +100,7 @@ class PlaybackController @Inject constructor(
             engine.stop()
             MediaPlaybackService.stop(context)
             Log.e("PlaybackController", "Unable to start background playback", error)
+            statusReporter.show(R.string.status_playback_failed)
         }
     }
 

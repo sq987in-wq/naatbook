@@ -46,6 +46,11 @@ class NaatViewModel @Inject constructor(
     private var draftPersistenceJob: Job? = null
     private val draftPersistenceMutex = Mutex()
     private var draftRevision = 0L
+
+    companion object {
+        /** Max audio attachment size: 100 MB. */
+        private const val MAX_ATTACHMENT_BYTES = 100L * 1024 * 1024
+    }
     val editorDraft: StateFlow<EditorDraft> = _editorDraft.asStateFlow()
     val editorEntryId: StateFlow<Int?> = editorDraft
         .map { it.editingId }
@@ -643,6 +648,16 @@ class NaatViewModel @Inject constructor(
     }
 
     private suspend fun copyLocalFileToAppStorageLocked(uri: Uri): File? = withContext(Dispatchers.IO) {
+        // Reject files over 100 MB to avoid filling app-private storage silently.
+        val fileSize = runCatching {
+            context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+        }.getOrNull() ?: -1L
+        if (fileSize > MAX_ATTACHMENT_BYTES) {
+            withContext(Dispatchers.Main.immediate) {
+                statusReporter.show(R.string.editor_file_too_large)
+            }
+            return@withContext null
+        }
         // Preserve the source file's extension instead of hardcoding .mp3 so the
         // player/sniffer sees the real format (wav, ogg, m4a, ...).
         val extension = resolveAudioExtension(uri)

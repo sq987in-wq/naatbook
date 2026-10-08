@@ -84,15 +84,38 @@ fun SettingsScreen(
         }
     )
 
+    var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
+
     // Open zip backup launcher
     val importBackupLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
         onResult = { uri ->
             if (uri != null) {
-                backupViewModel.restoreNotebook(uri)
+                // Show confirmation before importing (prevents accidental duplicates)
+                pendingImportUri = uri
             }
         }
     )
+
+    // Import confirmation dialog
+    pendingImportUri?.let { uri ->
+        AlertDialog(
+            onDismissRequest = { pendingImportUri = null },
+            title = { Text(stringResource(R.string.settings_import_confirm_title)) },
+            text = { Text(stringResource(R.string.settings_import_confirm_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingImportUri = null
+                    backupViewModel.restoreNotebook(uri)
+                }) { Text(stringResource(R.string.settings_import_confirm_import)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingImportUri = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        )
+    }
 
     Column(
         modifier = Modifier
