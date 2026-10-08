@@ -18,7 +18,7 @@ internal class EditorDraftDiskStore(context: Context) {
             editingId = if (json.isNull("editingId")) null else json.optInt("editingId"),
             title = json.optString("title"),
             poet = json.optString("poet"),
-            category = json.optString("category", com.example.data.NaatCategories.DEFAULT),
+            category = json.optString("category", com.aistudio.mynaatnotebook.data.NaatCategories.DEFAULT),
             lyrics = json.optString("lyrics"),
             existingAudioRemoved = json.optBoolean("existingAudioRemoved"),
             existingAudioType = json.optString("existingAudioType", "none"),
