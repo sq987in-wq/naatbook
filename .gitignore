@@ -15,3 +15,7 @@
 .cxx
 local.properties
 debug.keystore
+
+# Signing keystores must never be committed (see README: signing via env vars only)
+*.jks
+*.keystore
