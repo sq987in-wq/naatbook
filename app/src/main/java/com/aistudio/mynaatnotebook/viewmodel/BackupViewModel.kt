@@ -28,19 +28,26 @@ class BackupViewModel @Inject constructor(
     private val _isWorking = MutableStateFlow(false)
     val isWorking: StateFlow<Boolean> = _isWorking.asStateFlow()
 
+    private val _progress = MutableStateFlow<Float?>(null)
+    val progress: StateFlow<Float?> = _progress.asStateFlow()
+
     fun backupNotebook(uri: Uri) {
         if (_isWorking.value) return
         _isWorking.value = true
+        _progress.value = 0f
         viewModelScope.launch {
             try {
                 statusReporter.show(R.string.status_exporting)
-                val result = backupManager.exportBackup(uri)
+                val result = backupManager.exportBackup(uri) { p ->
+                    _progress.value = p.coerceIn(0f, 1f)
+                }
                 result.onSuccess {
                     statusReporter.show(R.string.status_export_success)
                 }.onFailure {
                     statusReporter.show(R.string.status_export_failed, it.localizedMessage ?: StatusMessage.Res(R.string.status_error_unknown))
                 }
             } finally {
+                _progress.value = null
                 _isWorking.value = false
             }
         }
@@ -49,16 +56,27 @@ class BackupViewModel @Inject constructor(
     fun restoreNotebook(uri: Uri) {
         if (_isWorking.value) return
         _isWorking.value = true
+        _progress.value = 0f
         viewModelScope.launch {
             try {
                 statusReporter.show(R.string.status_importing)
-                val result = backupManager.importBackup(uri)
-                result.onSuccess { count ->
-                    statusReporter.show(R.string.status_import_success, count)
+                val result = backupManager.importBackup(uri) { p ->
+                    _progress.value = p.coerceIn(0f, 1f)
+                }
+                result.onSuccess { importResult ->
+                    if (importResult.skipped > 0) {
+                        statusReporter.show(
+                            R.string.status_import_success_skipped,
+                            importResult.imported, importResult.skipped
+                        )
+                    } else {
+                        statusReporter.show(R.string.status_import_success, importResult.imported)
+                    }
                 }.onFailure {
                     statusReporter.show(R.string.status_import_failed, it.localizedMessage ?: StatusMessage.Res(R.string.status_error_unknown))
                 }
             } finally {
+                _progress.value = null
                 _isWorking.value = false
             }
         }
