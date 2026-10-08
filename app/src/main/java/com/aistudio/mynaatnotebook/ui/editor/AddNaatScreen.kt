@@ -145,6 +145,7 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
     val context = LocalContext.current
     val folderLabel = stringResource(R.string.editor_folder_label)
     val metadata by viewModel.editorMetadata.collectAsStateWithLifecycle()
+    val isSaving by viewModel.isSaving.collectAsStateWithLifecycle()
     var showCategoryDropdown by remember { mutableStateOf(false) }
     val lyricsDictationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -170,7 +171,8 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
             label = { Text(stringResource(R.string.editor_title_label)) },
             modifier = Modifier.fillMaxWidth().testTag("add_naat_title"),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-            singleLine = true
+            singleLine = true,
+            enabled = !isSaving
         )
         OutlinedTextField(
             value = metadata.poet,
@@ -178,7 +180,8 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
             label = { Text(stringResource(R.string.editor_poet_label)) },
             modifier = Modifier.fillMaxWidth().testTag("add_naat_poet"),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
-            singleLine = true
+            singleLine = true,
+            enabled = !isSaving
         )
         Box(Modifier.fillMaxWidth()) {
             // The read-only field stays visually consistent with the rest of the
@@ -258,7 +261,8 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
                 ) { Icon(Icons.Default.Mic, contentDescription = stringResource(R.string.editor_dictate_cd), tint = HighContrastGray) }
             },
             modifier = Modifier.fillMaxWidth().height(180.dp).testTag("add_naat_lyrics"),
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+            enabled = !isSaving
         )
     }
 }
@@ -315,7 +319,9 @@ private fun EditorAudioSection(viewModel: NaatViewModel) {
                 attachments.newAttachmentPath?.let { path ->
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            attachments.newAttachmentName ?: path.substringAfterLast('/'),
+                            attachments.newAttachmentName?.let {
+                                stringResource(R.string.editor_attached_file, it)
+                            } ?: path.substringAfterLast('/'),
                             color = HighContrastGray,
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
