@@ -31,8 +31,11 @@ Robolectric + JUnit (tests) · Gradle Kotlin DSL · AGP, compileSdk/targetSdk 36
 app/src/main/java/com/aistudio/mynaatnotebook/
   MainActivity.kt, NaatBookApplication.kt
   ui/        Compose screens: NaatApp.kt (nav), library/, editor/, reader/, settings/, theme/, components/
-  viewmodel/ NaatViewModel.kt (~1000 lines: library+editor+recording orchestration),
-             EditorDraftStore.kt, EditorDraftDiskStore.kt, DraftFileCleanup.kt, OperationGate.kt
+  viewmodel/ NaatViewModel.kt (library+editor+recording orchestration),
+             EditorDraft.kt (draft data classes), EditorDraftStore.kt,
+             EditorDraftDiskStore.kt, DraftFileCleanup.kt, OperationGate.kt,
+             SettingsViewModel.kt (theme/font size), BackupViewModel.kt (export/import),
+             StatusReporter.kt (shared @Singleton status/toast bus)
   data/      Room: NaatDatabase.kt (migrations 1→4), NaatDao.kt, NaatEntity.kt,
              NaatRepository.kt, BackupManager.kt (ZIP export/import, Zip-Slip guards),
              AudioFileLifecycleCoordinator.kt, SettingsStore.kt, NaatCategories.kt
@@ -105,9 +108,14 @@ CI runs the full unit suite; keep it green.
 - Last feature activity: 2026-09-03 (Strix workflow tuning). The app is in
   maintenance/polish state; next milestone is the **first Play Store release**
   (see PRD §8 for the pre-release checklist).
-- 2026-10-08 maintenance: `.gitignore` hardened (`*.jks`, `*.keystore`); Kotlin
-  namespace renamed `com.example` → `com.aistudio.mynaatnotebook`; added
-  `PRD.md` and this guide.
+- 2026-10-08 maintenance: `.gitignore` hardened (`*.jks`, `*.keystore`); added
+  `PRD.md` and this guide. (Kotlin namespace rename `com.example` →
+  `com.aistudio.mynaatnotebook` prepared as patch, not yet applied.)
+- 2026-10-08 refactor: split NaatViewModel — `SettingsViewModel` (theme/font size),
+  `BackupViewModel` (export/import), `StatusReporter` (shared status bus), and
+  `EditorDraft.kt` (draft data classes) extracted; NaatViewModel keeps the same
+  public API so screens are unaffected. Recording/editor remain in NaatViewModel
+  deliberately: they share one draft/recording state machine.
 
 ## 6. Gotchas for new agents
 

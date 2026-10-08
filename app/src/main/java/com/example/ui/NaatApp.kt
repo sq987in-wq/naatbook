@@ -39,7 +39,9 @@ import com.example.ui.library.LibraryScreen
 import com.example.ui.reader.LyricsReaderScreen
 import com.example.ui.settings.SettingsScreen
 import com.example.ui.theme.MyApplicationTheme
+import com.example.viewmodel.BackupViewModel
 import com.example.viewmodel.NaatViewModel
+import com.example.viewmodel.SettingsViewModel
 
 private object NaatRoutes {
     const val HOME = "home"
@@ -47,7 +49,11 @@ private object NaatRoutes {
 }
 
 @Composable
-fun NaatApp(viewModel: NaatViewModel) {
+fun NaatApp(
+    viewModel: NaatViewModel,
+    settingsViewModel: SettingsViewModel,
+    backupViewModel: BackupViewModel
+) {
     val context = LocalContext.current
     val navController = rememberNavController()
     val tabStateHolder = rememberSaveableStateHolder()
@@ -57,7 +63,7 @@ fun NaatApp(viewModel: NaatViewModel) {
     val currentTab by viewModel.currentTab.collectAsStateWithLifecycle()
     val showAddModal by viewModel.showAddModal.collectAsStateWithLifecycle()
     val selectedNaat by viewModel.selectedNaat.collectAsStateWithLifecycle()
-    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val themeMode by settingsViewModel.themeMode.collectAsStateWithLifecycle()
     val statusMessage by viewModel.statusMessage.collectAsStateWithLifecycle()
     val isSaving by viewModel.isSaving.collectAsStateWithLifecycle()
     val isAttaching by viewModel.isAttachingFile.collectAsStateWithLifecycle()
@@ -192,7 +198,7 @@ fun NaatApp(viewModel: NaatViewModel) {
                             // fade, or simultaneous full-screen composition.
                             tabStateHolder.SaveableStateProvider(currentTab) {
                                 when (currentTab) {
-                                    2 -> SettingsScreen(viewModel)
+                                    2 -> SettingsScreen(settingsViewModel, backupViewModel)
                                     else -> LibraryScreen(
                                         viewModel = viewModel,
                                         onOpenReader = ::openReader,
@@ -206,6 +212,7 @@ fun NaatApp(viewModel: NaatViewModel) {
                                 LyricsReaderScreen(
                                     naat = naat,
                                     viewModel = viewModel,
+                                    settingsViewModel = settingsViewModel,
                                     onClose = { viewModel.selectNaat(null) },
                                     onEdit = ::openEditorEntry
                                 )

@@ -86,6 +86,7 @@ import com.example.ui.theme.HighContrastGray
 import com.example.ui.theme.HighContrastRed
 import com.example.ui.theme.NastaliqFamily
 import com.example.viewmodel.NaatViewModel
+import com.example.viewmodel.SettingsViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -95,6 +96,7 @@ private val ReaderBottomBreathingRoom = 24.dp
 fun LyricsReaderScreen(
     naat: NaatEntity,
     viewModel: NaatViewModel,
+    settingsViewModel: SettingsViewModel,
     onClose: () -> Unit,
     onEdit: (NaatEntity) -> Unit
 ) {
@@ -125,7 +127,7 @@ fun LyricsReaderScreen(
     var scrollSpeed by remember { mutableFloatStateOf(1f) }
 
     // Sizing controls.
-    val defaultFontSize by viewModel.globalFontSize.collectAsStateWithLifecycle()
+    val defaultFontSize by settingsViewModel.globalFontSize.collectAsStateWithLifecycle()
     var localFontSize by remember { mutableStateOf(defaultFontSize) }
     LaunchedEffect(defaultFontSize) { localFontSize = defaultFontSize }
 
