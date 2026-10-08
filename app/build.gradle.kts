@@ -31,6 +31,16 @@ android {
       keyPassword = System.getenv("ANDROID_SIGNING_KEY_PASSWORD")
         ?: System.getenv("KEY_PASSWORD")
     }
+    // Shared debug key so every CI build signs with the same key.
+    // Without this, each GitHub Actions run generates a fresh debug keystore,
+    // and Android refuses to update the app (signature mismatch) — forcing
+    // an uninstall that wipes all user data.
+    create("debugShared") {
+      storeFile = file("${rootDir}/app/debug.keystore")
+      storePassword = "android"
+      keyAlias = "androiddebugkey"
+      keyPassword = "android"
+    }
   }
 
   buildTypes {
@@ -42,6 +52,7 @@ android {
       isMinifyEnabled = true
       isShrinkResources = true
       isCrunchPngs = false
+      signingConfig = signingConfigs.getByName("debugShared")
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
 
