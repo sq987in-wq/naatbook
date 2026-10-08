@@ -69,7 +69,6 @@ fun NaatApp(
     val selectedNaat by viewModel.selectedNaat.collectAsStateWithLifecycle()
     val themeMode by settingsViewModel.themeMode.collectAsStateWithLifecycle()
     val statusMessage by viewModel.statusMessage.collectAsStateWithLifecycle()
-    val nowPlaying by viewModel.playbackController.nowPlaying.collectAsStateWithLifecycle()
     val isSaving by viewModel.isSaving.collectAsStateWithLifecycle()
     val isAttaching by viewModel.isAttachingFile.collectAsStateWithLifecycle()
 
@@ -160,11 +159,11 @@ fun NaatApp(
                     containerColor = MaterialTheme.colorScheme.background,
                     contentColor = MaterialTheme.colorScheme.onBackground,
                     bottomBar = {
-                        // Show mini-player on reader too when a different entry is playing,
-                        // so the user can pause it without navigating back.
-                        val showMiniOnReader = currentRoute == NaatRoutes.READER &&
-                            nowPlaying != null && nowPlaying?.naatId != selectedNaat?.id
-                        if (atHome || showMiniOnReader) {
+                        // Mini-player is home-only. The reader has its own audio controls,
+                        // and the anti-bleed rule stops playback when switching entries,
+                        // so a global mini-player on the reader is unnecessary. (It also
+                        // caused a stuck detailNavigationPending guard when tapped.)
+                        if (atHome) {
                             Column {
                                 GlobalMiniPlayer(
                                     viewModel = viewModel,
