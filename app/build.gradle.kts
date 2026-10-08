@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-  namespace = "com.example"
+  namespace = "com.aistudio.mynaatnotebook"
   compileSdk = 36
 
   defaultConfig {
