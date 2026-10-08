@@ -6,7 +6,6 @@ import android.net.Uri
 import android.speech.RecognizerIntent
 import android.view.WindowManager
 import android.widget.Toast
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
@@ -435,8 +434,13 @@ fun LibraryScreen(
             title = { Text(stringResource(R.string.library_delete_title)) },
             text = {
                 Text(
-                    "\"${candidate.title}\" will be permanently deleted" +
-                        if (candidate.audioType != "none" || candidate.secondaryAudioType != "none") " along with its attached audio." else "."
+                    stringResource(
+                        R.string.library_delete_message,
+                        candidate.title,
+                        if (candidate.audioType != "none" || candidate.secondaryAudioType != "none")
+                            stringResource(R.string.library_delete_with_audio)
+                        else "."
+                    )
                 )
             },
             confirmButton = {
@@ -520,7 +524,7 @@ fun FolderSleekCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "$count ENTRIES",
+                    text = stringResource(R.string.library_entries_count, count),
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
