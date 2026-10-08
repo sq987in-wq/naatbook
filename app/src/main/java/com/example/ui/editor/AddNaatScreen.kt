@@ -328,7 +328,7 @@ private fun EditorAudioSection(viewModel: NaatViewModel) {
                                 it.copy(newAttachmentPath = null, newAttachmentName = null)
                             }
                         }) {
-                            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.editor_remove_linked_cd), tint = HighContrastRed)
+                            Icon(Icons.Default.Delete, contentDescription = "Remove linked file", tint = HighContrastRed)
                         }
                     }
                 }
@@ -359,7 +359,7 @@ private fun ExistingAttachments(
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    if (type == "recorded") stringResource(R.string.editor_current_voice_note) else stringResource(R.string.editor_current_linked_audio),
+                    if (type == "recorded") "Current voice note" else "Current linked audio",
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -370,7 +370,7 @@ private fun ExistingAttachments(
                         else it.copy(existingAudioRemoved = true)
                     }
                 }) {
-                    Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.editor_remove_attachment_cd), tint = HighContrastRed)
+                    Icon(Icons.Default.Delete, contentDescription = "Remove attachment", tint = HighContrastRed)
                 }
             }
         }
@@ -384,7 +384,7 @@ private fun RecorderControls(viewModel: NaatViewModel) {
     val activeFile by viewModel.activeRecordingFile.collectAsStateWithLifecycle()
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) viewModel.startRecording()
-        else Toast.makeText(context, context.getString(R.string.editor_mic_permission), Toast.LENGTH_LONG).show()
+        else Toast.makeText(context, "Microphone permission is required", Toast.LENGTH_LONG).show()
     }
 
     when (state) {
@@ -400,12 +400,12 @@ private fun RecorderControls(viewModel: NaatViewModel) {
                     modifier = Modifier.testTag(
                         if (state == RecordingState.RECORDING) "pause_recording_btn" else "resume_recording_btn"
                     )
-                ) { Text(if (state == RecordingState.RECORDING) stringResource(R.string.common_pause) else stringResource(R.string.editor_resume)) }
+                ) { Text(if (state == RecordingState.RECORDING) "Pause" else "Resume") }
                 Button(
                     onClick = viewModel::stopRecording,
                     colors = ButtonDefaults.buttonColors(containerColor = HighContrastRed),
                     modifier = Modifier.testTag("stop_recording_btn")
-                ) { Text(stringResource(R.string.editor_finish)) }
+                ) { Text("Finish") }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(
@@ -428,14 +428,14 @@ private fun RecorderControls(viewModel: NaatViewModel) {
                 ) {
                     Icon(Icons.Default.Mic, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.editor_tap_to_record))
+                    Text("Tap to Record")
                 }
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.CheckCircle, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        context.getString(R.string.editor_recording_ready, finishedFile.name),
+                        "Recording ready: ${finishedFile.name}",
                         modifier = Modifier.weight(1f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -447,11 +447,11 @@ private fun RecorderControls(viewModel: NaatViewModel) {
                     TextButton(
                         onClick = viewModel::discardRecording,
                         modifier = Modifier.testTag("discard_recording_btn")
-                    ) { Text(stringResource(R.string.common_discard), color = HighContrastRed) }
+                    ) { Text("Discard", color = HighContrastRed) }
                     IconButton(
                         onClick = viewModel::startRecording,
                         modifier = Modifier.testTag("rerecord_btn")
-                    ) { Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.editor_rerecord_cd)) }
+                    ) { Icon(Icons.Default.Refresh, contentDescription = "Re-record") }
                 }
             }
         }
@@ -467,7 +467,7 @@ private fun EditorSaveSection(viewModel: NaatViewModel) {
     Button(
         onClick = {
             if (metadata.title.isBlank()) {
-                Toast.makeText(context, context.getString(R.string.editor_title_required), Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Please enter a valid notebook title", Toast.LENGTH_SHORT).show()
             } else viewModel.saveDraft()
         },
         enabled = !isSaving && !isAttaching,
@@ -476,10 +476,10 @@ private fun EditorSaveSection(viewModel: NaatViewModel) {
         if (isSaving) {
             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.editor_saving), fontWeight = FontWeight.Bold)
+            Text("Saving…", fontWeight = FontWeight.Bold)
         } else {
             Text(
-                if (metadata.editingId != null) stringResource(R.string.editor_save_changes) else stringResource(R.string.editor_save_entry),
+                if (metadata.editingId != null) "Save Changes" else "Save Entry",
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp
             )
