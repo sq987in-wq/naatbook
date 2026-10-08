@@ -57,6 +57,7 @@ import com.example.ui.theme.HighContrastRed
 import com.example.ui.theme.HighContrastGray
 import com.example.viewmodel.NaatViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -114,7 +115,7 @@ fun LibraryScreen(
         ) {
             Icon(
                 imageVector = Icons.Default.Search,
-                contentDescription = "Search icon",
+                contentDescription = stringResource(R.string.library_search_cd),
                 tint = HighContrastGray,
                 modifier = Modifier.size(20.dp)
             )
@@ -141,7 +142,7 @@ fun LibraryScreen(
                     Box(contentAlignment = Alignment.CenterStart) {
                         if (searchQuery.isEmpty()) {
                             Text(
-                                text = "Search Naats, Poets, Lyrics...",
+                                text = stringResource(R.string.library_search_hint),
                                 color = HighContrastGray,
                                 style = MaterialTheme.typography.bodyLarge.copy(
                                     lineHeight = 20.sp
@@ -159,11 +160,11 @@ fun LibraryScreen(
                     try {
                         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak Naat keyword...")
+                            putExtra(RecognizerIntent.EXTRA_PROMPT, context.getString(R.string.library_voice_prompt))
                         }
                         speechRecognizerLauncher.launch(intent)
                     } catch (e: Exception) {
-                        Toast.makeText(context, "Speech-to-Text not supported or offline", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.library_stt_unsupported), Toast.LENGTH_SHORT).show()
                     }
                 },
                 modifier = Modifier
@@ -172,7 +173,7 @@ fun LibraryScreen(
             ) {
                 Icon(
                     imageVector = Icons.Default.Mic,
-                    contentDescription = "Voice search",
+                    contentDescription = stringResource(R.string.library_voice_search_cd),
                     tint = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.size(20.dp)
                 )
@@ -197,7 +198,7 @@ fun LibraryScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "LIBRARY FOLDERS",
+                        text = stringResource(R.string.library_folders_title),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = HighContrastGray,
@@ -207,7 +208,7 @@ fun LibraryScreen(
                     FilterChip(
                         selected = favoritesOnly,
                         onClick = { viewModel.toggleFavoritesOnly() },
-                        label = { Text("Favorites", fontSize = 11.sp) },
+                        label = { Text(stringResource(R.string.library_favorites_label), fontSize = 11.sp) },
                         leadingIcon = {
                             Icon(
                                 imageVector = if (favoritesOnly) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
@@ -281,7 +282,7 @@ fun LibraryScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "RECENT NOTEBOOKS",
+                        text = stringResource(R.string.library_recent_title),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = HighContrastGray,
@@ -297,7 +298,7 @@ fun LibraryScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "No entries in folders yet.",
+                            text = stringResource(R.string.library_empty_folders),
                             style = MaterialTheme.typography.bodyMedium,
                             color = HighContrastGray
                         )
@@ -322,9 +323,9 @@ fun LibraryScreen(
                 // Results list: global search across folders, and/or the favorites filter
                 Text(
                     text = when {
-                        favoritesOnly && searchQuery.isNotBlank() -> "FAVORITES · \"${searchQuery.trim().uppercase()}\""
-                        favoritesOnly -> "FAVORITES"
-                        else -> "RESULTS FOR \"${searchQuery.trim().uppercase()}\""
+                        favoritesOnly && searchQuery.isNotBlank() -> stringResource(R.string.library_favorites_query_title, searchQuery.trim().uppercase())
+                        favoritesOnly -> stringResource(R.string.library_favorites_title)
+                        else -> stringResource(R.string.library_results_title, searchQuery.trim().uppercase())
                     },
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
@@ -341,9 +342,9 @@ fun LibraryScreen(
                     ) {
                         Text(
                             text = if (favoritesOnly && searchQuery.isBlank()) {
-                                "No favorites yet.\nStar any entry with the heart icon to see it here."
+                                stringResource(R.string.library_empty_favorites)
                             } else {
-                                "No matches found.\nTry a different title, poet, or lyric phrase."
+                                stringResource(R.string.library_empty_search)
                             },
                             textAlign = TextAlign.Center,
                             style = MaterialTheme.typography.bodyMedium,
@@ -381,7 +382,7 @@ fun LibraryScreen(
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back to folders",
+                        contentDescription = stringResource(R.string.library_back_cd),
                         tint = MaterialTheme.colorScheme.onBackground
                     )
                 }
@@ -402,7 +403,7 @@ fun LibraryScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No entries in this folder yet.\nTap (+) below to add your first entry!",
+                        text = stringResource(R.string.library_empty_folder),
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.bodyMedium,
                         color = HighContrastGray
@@ -431,7 +432,7 @@ fun LibraryScreen(
     deleteCandidate?.let { candidate ->
         AlertDialog(
             onDismissRequest = { if (!isDeleting) deleteCandidate = null },
-            title = { Text("Delete this entry?") },
+            title = { Text(stringResource(R.string.library_delete_title)) },
             text = {
                 Text(
                     "\"${candidate.title}\" will be permanently deleted" +
@@ -449,15 +450,15 @@ fun LibraryScreen(
                     if (isDeleting) {
                         CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Deleting…")
+                        Text(stringResource(R.string.library_deleting))
                     } else {
-                        Text("Delete", color = HighContrastRed)
+                        Text(stringResource(R.string.common_delete), color = HighContrastRed)
                     }
                 }
             },
             dismissButton = {
                 TextButton(onClick = { deleteCandidate = null }, enabled = !isDeleting) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.common_cancel))
                 }
             }
         )
@@ -573,7 +574,7 @@ fun NaatRowItem(
                 )
                 if (!naat.poet.isNullOrBlank()) {
                     Text(
-                        text = "By ${naat.poet}",
+                        text = stringResource(R.string.library_by_poet, naat.poet),
                         style = MaterialTheme.typography.bodySmall,
                         color = HighContrastGray,
                         maxLines = 1,
@@ -587,11 +588,11 @@ fun NaatRowItem(
                 // Independent voice-note and linked-file indicators.
                 val audioTypes = setOf(naat.audioType, naat.secondaryAudioType)
                 if ("recorded" in audioTypes) {
-                    Icon(Icons.Default.Mic, contentDescription = "Recorded Audio Note Available",
+                    Icon(Icons.Default.Mic, contentDescription = stringResource(R.string.library_recorded_cd),
                         tint = HighContrastGray, modifier = Modifier.padding(end = 4.dp).size(20.dp))
                 }
                 if ("local_file" in audioTypes) {
-                    Icon(Icons.Default.MusicNote, contentDescription = "Linked MP3 Available",
+                    Icon(Icons.Default.MusicNote, contentDescription = stringResource(R.string.library_linked_cd),
                         tint = HighContrastGray, modifier = Modifier.padding(end = 4.dp).size(20.dp))
                 }
 
@@ -599,7 +600,7 @@ fun NaatRowItem(
                 IconButton(onClick = onEditClick, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = Icons.Default.Edit,
-                        contentDescription = "Edit entry",
+                        contentDescription = stringResource(R.string.common_edit_entry),
                         tint = HighContrastGray,
                         modifier = Modifier.size(20.dp)
                     )
@@ -609,7 +610,7 @@ fun NaatRowItem(
                 IconButton(onClick = onFavoriteClick, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = if (naat.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        contentDescription = "Favorite toggle",
+                        contentDescription = stringResource(R.string.library_favorite_toggle_cd),
                         tint = if (naat.isFavorite) HighContrastRed else HighContrastGray,
                         modifier = Modifier.size(22.dp)
                     )
@@ -619,7 +620,7 @@ fun NaatRowItem(
                 IconButton(onClick = onDeleteClick, modifier = Modifier.size(40.dp)) {
                     Icon(
                         imageVector = Icons.Default.Delete,
-                        contentDescription = "Delete entry",
+                        contentDescription = stringResource(R.string.library_delete_cd),
                         tint = HighContrastGray.copy(alpha = 0.6f),
                         modifier = Modifier.size(20.dp)
                     )

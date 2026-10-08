@@ -79,6 +79,8 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import com.example.data.NaatEntity
 import com.example.ui.components.formatTime
 import com.example.ui.components.usesArabicScript
@@ -281,7 +283,7 @@ fun LyricsReaderScreen(
                 modifier = Modifier.testTag("immersive_reader_hint")
             ) {
                 Text(
-                    text = "Tap once to show controls",
+                    text = stringResource(R.string.reader_tap_hint),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -310,7 +312,7 @@ private fun ReaderTopBar(
         IconButton(onClick = onClose, modifier = Modifier.testTag("close_reader")) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Close Reader",
+                contentDescription = stringResource(R.string.reader_close_cd),
                 tint = MaterialTheme.colorScheme.onBackground
             )
         }
@@ -324,7 +326,7 @@ private fun ReaderTopBar(
                 maxLines = 1
             )
             Text(
-                text = if (!naat.poet.isNullOrBlank()) "Poet: ${naat.poet}" else "Unknown Poet",
+                text = if (!naat.poet.isNullOrBlank()) stringResource(R.string.reader_poet, naat.poet) else stringResource(R.string.reader_unknown_poet),
                 style = MaterialTheme.typography.bodySmall,
                 color = HighContrastGray,
                 maxLines = 1
@@ -338,14 +340,14 @@ private fun ReaderTopBar(
             ) {
                 Icon(
                     imageVector = if (naat.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    contentDescription = "Toggle favorite",
+                    contentDescription = stringResource(R.string.reader_favorite_cd),
                     tint = if (naat.isFavorite) HighContrastRed else MaterialTheme.colorScheme.onBackground
                 )
             }
             IconButton(onClick = onEdit, modifier = Modifier.testTag("reader_edit_btn")) {
                 Icon(
                     imageVector = Icons.Default.Edit,
-                    contentDescription = "Edit entry",
+                    contentDescription = stringResource(R.string.common_edit_entry),
                     tint = MaterialTheme.colorScheme.onBackground
                 )
             }
@@ -359,7 +361,7 @@ private fun ReaderTopBar(
         ) {
             Icon(
                 imageVector = if (immersive) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                contentDescription = if (immersive) "Exit full screen reader" else "Enter full screen reader",
+                contentDescription = if (immersive) stringResource(R.string.reader_immersive_exit_cd) else stringResource(R.string.reader_immersive_enter_cd),
                 tint = MaterialTheme.colorScheme.onBackground
             )
         }
@@ -391,12 +393,12 @@ private fun ReaderControls(
         ) {
             Icon(
                 Icons.Default.Settings,
-                contentDescription = "Font size",
+                contentDescription = stringResource(R.string.reader_font_size_cd),
                 modifier = Modifier.size(16.dp),
                 tint = HighContrastGray
             )
             Spacer(modifier = Modifier.width(4.dp))
-            Text("Font:", style = MaterialTheme.typography.bodySmall, color = HighContrastGray)
+            Text(stringResource(R.string.reader_font_label), style = MaterialTheme.typography.bodySmall, color = HighContrastGray)
             Slider(
                 value = fontSize,
                 onValueChange = onFontSizeChange,
@@ -428,7 +430,7 @@ private fun ReaderControls(
                     .testTag("auto_scroll_toggle")
             ) {
                 Text(
-                    text = if (autoScrollActive) "Scrolling" else "AutoScroll",
+                    text = if (autoScrollActive) stringResource(R.string.reader_autoscroll_on) else stringResource(R.string.reader_autoscroll_off),
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -475,7 +477,7 @@ private fun ReaderLyricsViewport(
     val topPadding = with(density) { topChromePaddingPx.toDp() }
     val bottomPadding = with(density) { bottomChromePaddingPx.toDp() } + ReaderBottomBreathingRoom
     val horizontalPadding = if (immersive) 24.dp else 20.dp
-    val tapLabel = if (immersive) "Show or hide reader controls" else ""
+    val tapLabel = if (immersive) stringResource(R.string.reader_tap_label) else ""
     val tapModifier = Modifier.toggleReaderChromeOnIntentionalTap(
         enabled = immersive,
         onTap = onIntentionalTap
@@ -503,7 +505,7 @@ private fun ReaderLyricsViewport(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "No written lyrics provided.\nReady to recite with attached media!",
+                text = stringResource(R.string.reader_no_lyrics),
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.bodyMedium,
                 color = HighContrastGray
@@ -608,7 +610,7 @@ private fun ReaderAudioControls(
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            if (type == "recorded") "Voice Note" else "Linked Audio",
+                            if (type == "recorded") stringResource(R.string.reader_voice_note) else stringResource(R.string.reader_linked_audio),
                             fontWeight = if (selectedPath == path) FontWeight.Bold else FontWeight.Normal
                         )
                     }
@@ -616,7 +618,7 @@ private fun ReaderAudioControls(
             }
         }
         Text(
-            if (selectedType == "recorded") "Voice Note" else "Linked Audio",
+            if (selectedType == "recorded") stringResource(R.string.reader_voice_note) else stringResource(R.string.reader_linked_audio),
             modifier = Modifier.align(Alignment.CenterHorizontally),
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.SemiBold,
@@ -633,7 +635,7 @@ private fun ReaderAudioControls(
             ) {
                 Icon(
                     if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (playing) "Pause" else "Play",
+                    contentDescription = if (playing) stringResource(R.string.common_pause) else stringResource(R.string.common_play),
                     modifier = Modifier.size(32.dp)
                 )
             }

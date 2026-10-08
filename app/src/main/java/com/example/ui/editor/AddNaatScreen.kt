@@ -75,6 +75,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.res.stringResource
+import com.example.R
 import com.example.audio.RecordingState
 import com.example.data.NaatCategories
 import com.example.ui.components.AudioAttachmentPreview
@@ -124,7 +126,7 @@ private fun EditorHeader(viewModel: NaatViewModel, onClose: () -> Unit) {
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(
-            if (editingId != null) "Edit Notebook Entry" else "Add New Notebook Entry",
+            if (editingId != null) stringResource(R.string.editor_title_edit) else stringResource(R.string.editor_title_add),
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold
         )
@@ -133,7 +135,7 @@ private fun EditorHeader(viewModel: NaatViewModel, onClose: () -> Unit) {
             enabled = !isSaving && !isAttaching,
             modifier = Modifier.testTag("close_add_modal")
         ) {
-            Icon(Icons.Default.Close, contentDescription = "Close modal")
+            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.editor_close_cd))
         }
     }
 }
@@ -141,6 +143,7 @@ private fun EditorHeader(viewModel: NaatViewModel, onClose: () -> Unit) {
 @Composable
 private fun EditorMetadataSection(viewModel: NaatViewModel) {
     val context = LocalContext.current
+    val folderLabel = stringResource(R.string.editor_folder_label)
     val metadata by viewModel.editorMetadata.collectAsStateWithLifecycle()
     var showCategoryDropdown by remember { mutableStateOf(false) }
     val lyricsDictationLauncher = rememberLauncherForActivityResult(
@@ -164,7 +167,7 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
         OutlinedTextField(
             value = metadata.title,
             onValueChange = { value -> viewModel.updateDraft { it.copy(title = value) } },
-            label = { Text("Title (Required)") },
+            label = { Text(stringResource(R.string.editor_title_label)) },
             modifier = Modifier.fillMaxWidth().testTag("add_naat_title"),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
             singleLine = true
@@ -172,7 +175,7 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
         OutlinedTextField(
             value = metadata.poet,
             onValueChange = { value -> viewModel.updateDraft { it.copy(poet = value) } },
-            label = { Text("Poet Name (Optional)") },
+            label = { Text(stringResource(R.string.editor_poet_label)) },
             modifier = Modifier.fillMaxWidth().testTag("add_naat_poet"),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
             singleLine = true
@@ -185,7 +188,7 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
                 value = metadata.category,
                 onValueChange = {},
                 readOnly = true,
-                label = { Text("Folder Location") },
+                label = { Text(folderLabel) },
                 trailingIcon = {
                     Icon(
                         imageVector = if (showCategoryDropdown) {
@@ -204,7 +207,7 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
                 modifier = Modifier
                     .matchParentSize()
                     .semantics(mergeDescendants = true) {
-                        contentDescription = "Folder Location"
+                        contentDescription = folderLabel
                         stateDescription = "${metadata.category}, $folderState"
                     }
                     .clickable(role = Role.DropdownList) {
@@ -230,8 +233,8 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
         OutlinedTextField(
             value = metadata.lyrics,
             onValueChange = { value -> viewModel.updateDraft { it.copy(lyrics = value) } },
-            label = { Text("Lyrics") },
-            placeholder = { Text("Add lyrics here...") },
+            label = { Text(stringResource(R.string.editor_lyrics_label)) },
+            placeholder = { Text(stringResource(R.string.editor_lyrics_hint)) },
             textStyle = LocalTextStyle.current.copy(
                 fontFamily = if (usesArabicScript(metadata.lyrics)) NastaliqFamily else FontFamily.Default,
                 lineHeight = if (usesArabicScript(metadata.lyrics)) 32.sp else LocalTextStyle.current.lineHeight
@@ -245,14 +248,14 @@ private fun EditorMetadataSection(viewModel: NaatViewModel) {
                                     RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                                     RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
                                 )
-                                putExtra(RecognizerIntent.EXTRA_PROMPT, "Dictate the kalam...")
+                                putExtra(RecognizerIntent.EXTRA_PROMPT, context.getString(R.string.editor_dictate_prompt))
                             })
                         } catch (_: Exception) {
-                            Toast.makeText(context, "Speech-to-Text not supported", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.editor_stt_unsupported), Toast.LENGTH_SHORT).show()
                         }
                     },
                     modifier = Modifier.testTag("lyrics_dictate_mic")
-                ) { Icon(Icons.Default.Mic, contentDescription = "Dictate lyrics", tint = HighContrastGray) }
+                ) { Icon(Icons.Default.Mic, contentDescription = stringResource(R.string.editor_dictate_cd), tint = HighContrastGray) }
             },
             modifier = Modifier.fillMaxWidth().height(180.dp).testTag("add_naat_lyrics"),
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)
@@ -272,7 +275,7 @@ private fun EditorAudioSection(viewModel: NaatViewModel) {
             viewModel.attachLocalFile(uri) { success ->
                 Toast.makeText(
                     context,
-                    if (success) "Audio file attached successfully!" else "Failed to copy audio attachment",
+                    if (success) context.getString(R.string.editor_attach_success) else context.getString(R.string.editor_attach_failed),
                     Toast.LENGTH_SHORT
                 ).show()
             }
@@ -280,7 +283,7 @@ private fun EditorAudioSection(viewModel: NaatViewModel) {
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Dual-Audio Attachments", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.editor_dual_audio_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Card(
             modifier = Modifier.fillMaxWidth()
                 .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)),
@@ -290,10 +293,10 @@ private fun EditorAudioSection(viewModel: NaatViewModel) {
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 ExistingAttachments(attachments, activeRecordingFile != null, viewModel)
-                Text("In-App Voice Recorder", fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.editor_recorder_title), fontWeight = FontWeight.SemiBold)
                 RecorderControls(viewModel)
                 HorizontalDivider()
-                Text("Link External MP3 / M4A File", fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.editor_link_title), fontWeight = FontWeight.SemiBold)
                 Button(
                     onClick = { audioPicker.launch("audio/*") },
                     enabled = !isAttaching,
@@ -302,11 +305,11 @@ private fun EditorAudioSection(viewModel: NaatViewModel) {
                     if (isAttaching) {
                         CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(6.dp))
-                        Text("Attaching...")
+                        Text(stringResource(R.string.editor_attaching))
                     } else {
                         Icon(Icons.Default.MusicNote, contentDescription = null)
                         Spacer(Modifier.width(4.dp))
-                        Text("Browse Local Storage")
+                        Text(stringResource(R.string.editor_browse))
                     }
                 }
                 attachments.newAttachmentPath?.let { path ->
@@ -326,7 +329,7 @@ private fun EditorAudioSection(viewModel: NaatViewModel) {
                                 it.copy(newAttachmentPath = null, newAttachmentName = null)
                             }
                         }) {
-                            Icon(Icons.Default.Delete, contentDescription = "Remove linked file", tint = HighContrastRed)
+                            Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.editor_remove_linked_cd), tint = HighContrastRed)
                         }
                     }
                 }
@@ -357,7 +360,7 @@ private fun ExistingAttachments(
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    if (type == "recorded") "Current voice note" else "Current linked audio",
+                    if (type == "recorded") stringResource(R.string.editor_current_voice_note) else stringResource(R.string.editor_current_linked_audio),
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -368,7 +371,7 @@ private fun ExistingAttachments(
                         else it.copy(existingAudioRemoved = true)
                     }
                 }) {
-                    Icon(Icons.Default.Delete, contentDescription = "Remove attachment", tint = HighContrastRed)
+                    Icon(Icons.Default.Delete, contentDescription = stringResource(R.string.editor_remove_attachment_cd), tint = HighContrastRed)
                 }
             }
         }
@@ -382,7 +385,7 @@ private fun RecorderControls(viewModel: NaatViewModel) {
     val activeFile by viewModel.activeRecordingFile.collectAsStateWithLifecycle()
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) viewModel.startRecording()
-        else Toast.makeText(context, "Microphone permission is required", Toast.LENGTH_LONG).show()
+        else Toast.makeText(context, context.getString(R.string.editor_mic_permission), Toast.LENGTH_LONG).show()
     }
 
     when (state) {
@@ -398,12 +401,12 @@ private fun RecorderControls(viewModel: NaatViewModel) {
                     modifier = Modifier.testTag(
                         if (state == RecordingState.RECORDING) "pause_recording_btn" else "resume_recording_btn"
                     )
-                ) { Text(if (state == RecordingState.RECORDING) "Pause" else "Resume") }
+                ) { Text(if (state == RecordingState.RECORDING) stringResource(R.string.common_pause) else stringResource(R.string.editor_resume)) }
                 Button(
                     onClick = viewModel::stopRecording,
                     colors = ButtonDefaults.buttonColors(containerColor = HighContrastRed),
                     modifier = Modifier.testTag("stop_recording_btn")
-                ) { Text("Finish") }
+                ) { Text(stringResource(R.string.editor_finish)) }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(
@@ -426,14 +429,14 @@ private fun RecorderControls(viewModel: NaatViewModel) {
                 ) {
                     Icon(Icons.Default.Mic, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
-                    Text("Tap to Record")
+                    Text(stringResource(R.string.editor_tap_to_record))
                 }
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.CheckCircle, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        "Recording ready: ${finishedFile.name}",
+                        context.getString(R.string.editor_recording_ready, finishedFile.name),
                         modifier = Modifier.weight(1f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -445,11 +448,11 @@ private fun RecorderControls(viewModel: NaatViewModel) {
                     TextButton(
                         onClick = viewModel::discardRecording,
                         modifier = Modifier.testTag("discard_recording_btn")
-                    ) { Text("Discard", color = HighContrastRed) }
+                    ) { Text(stringResource(R.string.common_discard), color = HighContrastRed) }
                     IconButton(
                         onClick = viewModel::startRecording,
                         modifier = Modifier.testTag("rerecord_btn")
-                    ) { Icon(Icons.Default.Refresh, contentDescription = "Re-record") }
+                    ) { Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.editor_rerecord_cd)) }
                 }
             }
         }
@@ -465,7 +468,7 @@ private fun EditorSaveSection(viewModel: NaatViewModel) {
     Button(
         onClick = {
             if (metadata.title.isBlank()) {
-                Toast.makeText(context, "Please enter a valid notebook title", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.editor_title_required), Toast.LENGTH_SHORT).show()
             } else viewModel.saveDraft()
         },
         enabled = !isSaving && !isAttaching,
@@ -474,10 +477,10 @@ private fun EditorSaveSection(viewModel: NaatViewModel) {
         if (isSaving) {
             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             Spacer(Modifier.width(8.dp))
-            Text("Saving…", fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.editor_saving), fontWeight = FontWeight.Bold)
         } else {
             Text(
-                if (metadata.editingId != null) "Save Changes" else "Save Entry",
+                if (metadata.editingId != null) stringResource(R.string.editor_save_changes) else stringResource(R.string.editor_save_entry),
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp
             )
