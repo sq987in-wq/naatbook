@@ -82,6 +82,15 @@ fun NaatApp(
         detailNavigationPending = false
         if (!showAddModal) showDiscardConfirmation = false
     }
+    // Safety net: the guard must never stick longer than a few seconds. If
+    // navigation fails to complete (e.g., loadNaat never calls back), the guard
+    // would otherwise silently kill all taps until the next route change.
+    LaunchedEffect(detailNavigationPending) {
+        if (detailNavigationPending) {
+            kotlinx.coroutines.delay(3000)
+            detailNavigationPending = false
+        }
+    }
 
     val darkThemeEnabled = when (themeMode) {
         "white" -> false
