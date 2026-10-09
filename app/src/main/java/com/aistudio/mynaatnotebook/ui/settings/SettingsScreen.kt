@@ -74,6 +74,7 @@ fun SettingsScreen(
     val themeMode by settingsViewModel.themeMode.collectAsStateWithLifecycle()
     val globalFontSize by settingsViewModel.globalFontSize.collectAsStateWithLifecycle()
     val backupProgress by backupViewModel.progress.collectAsStateWithLifecycle()
+    val backupWorking by backupViewModel.isWorking.collectAsStateWithLifecycle()
 
     // Create zip launcher
     val exportBackupLauncher = rememberLauncherForActivityResult(
@@ -249,6 +250,7 @@ fun SettingsScreen(
                     val fileName = "NaatNotebook_backup_$timestamp.zip"
                     exportBackupLauncher.launch(fileName)
                 },
+                enabled = !backupWorking,
                 modifier = Modifier
                     .weight(1f)
                     .height(48.dp)
@@ -265,6 +267,7 @@ fun SettingsScreen(
                 onClick = {
                     importBackupLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
                 },
+                enabled = !backupWorking,
                 modifier = Modifier
                     .weight(1f)
                     .height(48.dp)
