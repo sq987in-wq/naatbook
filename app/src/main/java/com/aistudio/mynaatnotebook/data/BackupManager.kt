@@ -100,7 +100,7 @@ class BackupManager @Inject constructor(
     suspend fun exportBackup(
         outputUri: Uri,
         onProgress: (Float) -> Unit = {}
-    ): Result<String> = withContext(Dispatchers.IO) {
+    ): Result<Int> = withContext(Dispatchers.IO) {
         audioFiles.exclusive {
             val stagedZip = File(context.cacheDir, "backup-export-${UUID.randomUUID()}.zip")
         runCatching {
@@ -169,7 +169,7 @@ class BackupManager @Inject constructor(
                 }
             }
             onProgress(1f)
-            "Backup exported successfully"
+            naats.size
             }.onFailure { Log.e("BackupManager", "Export failed", it) }
                 .also { stagedZip.delete() }
         }

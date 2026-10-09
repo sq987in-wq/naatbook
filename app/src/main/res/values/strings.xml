@@ -129,7 +129,7 @@
     <string name="status_entry_lookup_failed">Unable to open entry</string>
     <string name="status_open_playing_failed">Unable to open the playing entry: %1$s</string>
     <string name="status_exporting">Exporting backup, please wait...</string>
-    <string name="status_export_success">Library Backup Exported Successfully!</string>
+    <string name="status_export_success">Library Backup Exported Successfully! %1$d entries.</string>
     <string name="status_export_failed">Export Failed: %1$s</string>
     <string name="status_importing">Importing backup, please wait...</string>
     <string name="status_import_success">Library Restored Successfully! Loaded %1$d entries.</string>
@@ -148,4 +148,5 @@
     <string name="settings_import_confirm_import">Import</string>
     <string name="action_cancel">Cancel</string>
     <string name="editor_file_too_large">File is too large (max 100 MB)</string>
+    <string name="editor_invalid_audio_file">This file is not valid audio and was not attached</string>
 </resources>

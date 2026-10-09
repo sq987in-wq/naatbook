@@ -1,6 +1,7 @@
 package com.aistudio.mynaatnotebook.viewmodel
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.SavedStateHandle
@@ -673,11 +674,38 @@ class NaatViewModel @Inject constructor(
                     outputStream.fd.sync()
                 }
             }
+            // Validate that the copied file is actually playable audio.
+            // A corrupt or non-audio file would otherwise fail silently at playback time.
+            if (!isPlayableAudio(destination)) {
+                Log.w("NaatViewModel", "Attached file is not valid audio, rejecting")
+                withContext(Dispatchers.Main.immediate) {
+                    statusReporter.show(R.string.editor_invalid_audio_file)
+                }
+                runCatching { destination.delete() }
+                return@withContext null
+            }
             destination
         } catch (error: Exception) {
             Log.e("NaatViewModel", "Failed to copy local file", error)
             runCatching { destination.delete() }
             null
+        }
+    }
+
+    /** Returns true if the file has a readable audio track. */
+    private fun isPlayableAudio(file: File): Boolean {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            // Has audio if duration metadata exists and is positive.
+            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: 0L
+            duration > 0
+        } catch (error: Exception) {
+            Log.w("NaatViewModel", "Audio validation failed", error)
+            false
+        } finally {
+            runCatching { retriever.release() }
         }
     }
 
