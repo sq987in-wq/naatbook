@@ -109,15 +109,29 @@ fun NaatApp(
     AppBackHandler(currentRoute, currentTab, showAddModal, viewModel)
 
     fun openReader(id: Int) {
-        if (showAddModal || currentRoute != NaatRoutes.HOME) return
-        if (!navigationDebouncePassed()) return
+        // DIAGNOSTIC: show exactly why a tap is blocked (temporary debug aid).
+        if (showAddModal || currentRoute != NaatRoutes.HOME) {
+            Toast.makeText(
+                context,
+                "Tap blocked: modal=$showAddModal route=$currentRoute",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+        if (!navigationDebouncePassed()) {
+            Toast.makeText(context, "Tap blocked: debounce", Toast.LENGTH_SHORT).show()
+            return
+        }
+        Toast.makeText(context, "Tap OK: loading entry $id", Toast.LENGTH_SHORT).show()
         viewModel.loadNaat(
             id = id,
             onLoaded = { naat ->
                 viewModel.selectNaat(naat)
                 navController.navigate(NaatRoutes.READER) { launchSingleTop = true }
             },
-            onFailure = { /* debounce expires on its own; nothing to reset */ }
+            onFailure = {
+                Toast.makeText(context, "Load failed for entry $id", Toast.LENGTH_SHORT).show()
+            }
         )
     }
 
