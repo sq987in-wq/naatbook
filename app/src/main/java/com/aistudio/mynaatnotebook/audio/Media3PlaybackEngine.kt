@@ -149,6 +149,28 @@ class Media3PlaybackEngine @Inject constructor(
         publishState()
     }
 
+    fun skipForward(seconds: Int = 10) {
+        if (!hasActiveSession()) return
+        val target = (player.currentPosition + seconds * 1000L)
+            .coerceAtMost(player.duration.coerceAtLeast(0))
+        player.seekTo(target)
+        publishState()
+    }
+
+    fun skipBackward(seconds: Int = 10) {
+        if (!hasActiveSession()) return
+        val target = (player.currentPosition - seconds * 1000L).coerceAtLeast(0)
+        player.seekTo(target)
+        publishState()
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        player.setPlaybackSpeed(speed.coerceIn(0.25f, 3.0f))
+        publishState()
+    }
+
+    fun getPlaybackSpeed(): Float = player.playbackSpeed
+
     fun hasActiveSession(): Boolean = !released && player.mediaItemCount > 0
 
     fun stop() = ensureIdle()

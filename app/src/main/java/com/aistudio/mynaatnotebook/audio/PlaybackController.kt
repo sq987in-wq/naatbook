@@ -127,7 +127,60 @@ class PlaybackController @Inject constructor(
     fun resume() = engine.resume()
     fun togglePlayPause() = engine.togglePlayPause()
     fun seekTo(positionMs: Int) = engine.seekTo(positionMs)
+    fun skipForward(seconds: Int = 10) = engine.skipForward(seconds)
+    fun skipBackward(seconds: Int = 10) = engine.skipBackward(seconds)
     fun stop() = engine.stop()
+
+    // --- Playback speed ---
+    private val _playbackSpeed = MutableStateFlow(1.0f)
+    val playbackSpeed: StateFlow<Float> = _playbackSpeed.asStateFlow()
+
+    fun setPlaybackSpeed(speed: Float) {
+        val clamped = speed.coerceIn(0.5f, 2.0f)
+        _playbackSpeed.value = clamped
+        engine.setPlaybackSpeed(clamped)
+    }
+
+    fun cyclePlaybackSpeed() {
+        val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+        val current = _playbackSpeed.value
+        val nextIndex = (speeds.indexOfFirst { it > current + 0.01f }.takeIf { it >= 0 }
+            ?: 0)
+        setPlaybackSpeed(speeds[nextIndex])
+    }
+
+    // --- Sleep timer ---
+    private val _sleepTimerRemainingMs = MutableStateFlow<Long?>(null)
+    /** Remaining millis, or null when the timer is off. */
+    val sleepTimerRemainingMs: StateFlow<Long?> = _sleepTimerRemainingMs.asStateFlow()
+    private var sleepTimerJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Starts a sleep timer that pauses playback after [minutes].
+     * Any existing timer is replaced.
+     */
+    fun setSleepTimer(minutes: Int) {
+        cancelSleepTimer()
+        if (minutes <= 0) return
+        _sleepTimerRemainingMs.value = minutes * 60_000L
+        sleepTimerJob = kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            var remaining = minutes * 60_000L
+            while (remaining > 0) {
+                kotlinx.coroutines.delay(1_000L)
+                remaining -= 1_000L
+                _sleepTimerRemainingMs.value = remaining.coerceAtLeast(0)
+            }
+            _sleepTimerRemainingMs.value = null
+            pause()
+            statusReporter.show(R.string.player_sleep_timer_done)
+        }
+    }
+
+    fun cancelSleepTimer() {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        _sleepTimerRemainingMs.value = null
+    }
 
     /** Closing/backgrounding the editor cannot stop a service-owned entry. */
     fun stopPreview() {
