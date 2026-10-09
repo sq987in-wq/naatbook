@@ -73,23 +73,18 @@ fun NaatApp(
     val isAttaching by viewModel.isAttachingFile.collectAsStateWithLifecycle()
 
     var showDiscardConfirmation by rememberSaveable { mutableStateOf(false) }
-    var detailNavigationPending by remember { mutableStateOf(false) }
-    LaunchedEffect(currentRoute, showAddModal) {
-        // Always release the coalescing gate when navigation/modal state settles.
-        // The guard only blocks double-taps during the transition itself; once the
-        // route or sheet state changes (in any direction), the attempt is over and
-        // the guard must not stick. A stuck guard silently kills all entry/edit/FAB taps.
-        detailNavigationPending = false
-        if (!showAddModal) showDiscardConfirmation = false
+    // Navigation debounce: time-based, can never get stuck. The old boolean
+    // guard (detailNavigationPending) could stick at true and silently kill all
+    // taps. A timestamp simply expires — no reset logic to fail.
+    var lastNavigationAttempt by remember { mutableStateOf(0L) }
+    fun navigationDebouncePassed(): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - lastNavigationAttempt < 500) return false
+        lastNavigationAttempt = now
+        return true
     }
-    // Safety net: the guard must never stick longer than a few seconds. If
-    // navigation fails to complete (e.g., loadNaat never calls back), the guard
-    // would otherwise silently kill all taps until the next route change.
-    LaunchedEffect(detailNavigationPending) {
-        if (detailNavigationPending) {
-            kotlinx.coroutines.delay(3000)
-            detailNavigationPending = false
-        }
+    LaunchedEffect(currentRoute, showAddModal) {
+        if (!showAddModal) showDiscardConfirmation = false
     }
 
     val darkThemeEnabled = when (themeMode) {
@@ -114,37 +109,37 @@ fun NaatApp(
     AppBackHandler(currentRoute, currentTab, showAddModal, viewModel)
 
     fun openReader(id: Int) {
-        if (detailNavigationPending || showAddModal || currentRoute != NaatRoutes.HOME) return
-        detailNavigationPending = true
+        if (showAddModal || currentRoute != NaatRoutes.HOME) return
+        if (!navigationDebouncePassed()) return
         viewModel.loadNaat(
             id = id,
             onLoaded = { naat ->
                 viewModel.selectNaat(naat)
                 navController.navigate(NaatRoutes.READER) { launchSingleTop = true }
             },
-            onFailure = { detailNavigationPending = false }
+            onFailure = { /* debounce expires on its own; nothing to reset */ }
         )
     }
 
     fun openEditorEntry(naat: NaatEntity) {
-        if (detailNavigationPending || showAddModal) return
-        detailNavigationPending = true
+        if (showAddModal) return
+        if (!navigationDebouncePassed()) return
         viewModel.startEditNaat(naat)
     }
 
     fun openEditorById(id: Int) {
-        if (detailNavigationPending || showAddModal || currentRoute != NaatRoutes.HOME) return
-        detailNavigationPending = true
+        if (showAddModal || currentRoute != NaatRoutes.HOME) return
+        if (!navigationDebouncePassed()) return
         viewModel.loadNaat(
             id = id,
             onLoaded = { naat -> viewModel.startEditNaat(naat) },
-            onFailure = { detailNavigationPending = false }
+            onFailure = { /* debounce expires on its own; nothing to reset */ }
         )
     }
 
     fun openAdd() {
-        if (detailNavigationPending || showAddModal || currentRoute != NaatRoutes.HOME) return
-        detailNavigationPending = true
+        if (showAddModal || currentRoute != NaatRoutes.HOME) return
+        if (!navigationDebouncePassed()) return
         // A FAB press always represents a deliberately fresh new entry, never a
         // dormant edit draft. startAddDraft handles recorder/file cleanup off-main.
         viewModel.startAddDraft(forceFresh = true)
@@ -172,16 +167,14 @@ fun NaatApp(
                     bottomBar = {
                         // Mini-player is home-only. The reader has its own audio controls,
                         // and the anti-bleed rule stops playback when switching entries,
-                        // so a global mini-player on the reader is unnecessary. (It also
-                        // caused a stuck detailNavigationPending guard when tapped.)
+                        // so a global mini-player on the reader is unnecessary.
                         if (atHome) {
                             Column {
                                 GlobalMiniPlayer(
                                     viewModel = viewModel,
                                     onOpen = {
                                         viewModel.openNowPlayingEntry { found ->
-                                            if (found && !detailNavigationPending && !showAddModal) {
-                                                detailNavigationPending = true
+                                            if (found && !showAddModal && navigationDebouncePassed()) {
                                                 navController.navigate(NaatRoutes.READER) {
                                                     launchSingleTop = true
                                                 }
