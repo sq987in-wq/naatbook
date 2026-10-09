@@ -41,8 +41,8 @@ class BackupViewModel @Inject constructor(
                 val result = backupManager.exportBackup(uri) { p ->
                     _progress.value = p.coerceIn(0f, 1f)
                 }
-                result.onSuccess {
-                    statusReporter.show(R.string.status_export_success)
+                result.onSuccess { count ->
+                    statusReporter.show(R.string.status_export_success, count)
                 }.onFailure {
                     statusReporter.show(R.string.status_export_failed, it.localizedMessage ?: StatusMessage.Res(R.string.status_error_unknown))
                 }
