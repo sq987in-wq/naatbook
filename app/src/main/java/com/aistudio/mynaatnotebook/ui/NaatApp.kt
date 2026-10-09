@@ -106,11 +106,26 @@ fun NaatApp(
         if (currentRoute == NaatRoutes.READER && selectedNaat == null) navController.popBackStack()
     }
 
-    AppBackHandler(currentRoute, currentTab, showAddModal, viewModel)
+    AppBackHandler(
+        currentRoute,
+        currentTab,
+        showAddModal,
+        viewModel,
+        onReaderBack = {
+            viewModel.selectNaat(null)
+            navController.popBackStack()
+        }
+    )
 
     fun openReader(id: Int) {
-        if (showAddModal || currentRoute != NaatRoutes.HOME) return
+        if (showAddModal) return
         if (!navigationDebouncePassed()) return
+        // Do NOT require currentRoute == HOME. The back-stack pop when leaving
+        // the reader can fail silently, leaving currentRoute stuck at READER
+        // while the UI shows the list. In that state the old route check
+        // silently killed every tap. Navigating with launchSingleTop is safe
+        // from any route: it never duplicates the reader, and selectNaat
+        // updates the displayed entry.
         viewModel.loadNaat(
             id = id,
             onLoaded = { naat ->
@@ -227,7 +242,10 @@ fun NaatApp(
                                     naat = naat,
                                     viewModel = viewModel,
                                     settingsViewModel = settingsViewModel,
-                                    onClose = { viewModel.selectNaat(null) },
+                                    onClose = {
+                                        viewModel.selectNaat(null)
+                                        navController.popBackStack()
+                                    },
                                     onEdit = ::openEditorEntry
                                 )
                             }
@@ -277,7 +295,8 @@ private fun AppBackHandler(
     currentRoute: String?,
     currentTab: Int,
     editorModalVisible: Boolean,
-    viewModel: NaatViewModel
+    viewModel: NaatViewModel,
+    onReaderBack: () -> Unit
 ) {
     val selectedFolder by viewModel.selectedFolder.collectAsStateWithLifecycle()
     val favoritesOnly by viewModel.showFavoritesOnly.collectAsStateWithLifecycle()
@@ -290,7 +309,12 @@ private fun AppBackHandler(
     )
     BackHandler(enabled = canHandleAppBack) {
         when {
-            currentRoute == NaatRoutes.READER -> viewModel.selectNaat(null)
+            // Pop explicitly AND clear selection atomically. Relying on the
+            // LaunchedEffect to pop after selectNaat(null) was unreliable: the
+            // pop sometimes never happened, leaving currentRoute stuck at
+            // READER while the list was shown, which silently blocked all
+            // subsequent entry taps.
+            currentRoute == NaatRoutes.READER -> onReaderBack()
             currentRoute == NaatRoutes.HOME && currentTab == 2 -> {
                 viewModel.selectTab(0)
                 viewModel.resetLibraryToHome()
