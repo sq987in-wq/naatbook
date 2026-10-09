@@ -749,6 +749,12 @@ class NaatViewModel @Inject constructor(
     // --- CRUD DB Operations ---
     fun saveDraft() {
         if (!saveGate.tryStart()) return
+        // Defensive: UI blocks blank titles, but never trust the UI alone.
+        if (_editorDraft.value.title.isBlank()) {
+            saveGate.finish()
+            statusReporter.show(R.string.editor_title_required)
+            return
+        }
         _isSaving.value = true
 
         viewModelScope.launch {

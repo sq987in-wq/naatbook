@@ -393,6 +393,16 @@ fun LibraryScreen(
                     modifier = Modifier.weight(1f)
                 )
             }
+            // Show when search is active inside a folder, so the user knows
+            // the results are scoped and not global.
+            if (searchQuery.isNotBlank()) {
+                Text(
+                    text = stringResource(R.string.library_search_in_folder, selectedFolder ?: ""),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = HighContrastGray,
+                    modifier = Modifier.padding(start = 48.dp, bottom = 8.dp)
+                )
+            }
 
             if (filteredNaats.isEmpty()) {
                 Box(
