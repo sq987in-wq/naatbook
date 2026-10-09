@@ -169,7 +169,7 @@ class Media3PlaybackEngine @Inject constructor(
         publishState()
     }
 
-    fun getPlaybackSpeed(): Float = player.playbackSpeed
+    fun getPlaybackSpeed(): Float = player.playbackParameters.speed
 
     fun hasActiveSession(): Boolean = !released && player.mediaItemCount > 0
 

@@ -13,6 +13,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -154,6 +155,9 @@ class PlaybackController @Inject constructor(
     /** Remaining millis, or null when the timer is off. */
     val sleepTimerRemainingMs: StateFlow<Long?> = _sleepTimerRemainingMs.asStateFlow()
     private var sleepTimerJob: kotlinx.coroutines.Job? = null
+    private val timerScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate
+    )
 
     /**
      * Starts a sleep timer that pauses playback after [minutes].
@@ -163,7 +167,7 @@ class PlaybackController @Inject constructor(
         cancelSleepTimer()
         if (minutes <= 0) return
         _sleepTimerRemainingMs.value = minutes * 60_000L
-        sleepTimerJob = kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+        sleepTimerJob = timerScope.launch {
             var remaining = minutes * 60_000L
             while (remaining > 0) {
                 kotlinx.coroutines.delay(1_000L)
