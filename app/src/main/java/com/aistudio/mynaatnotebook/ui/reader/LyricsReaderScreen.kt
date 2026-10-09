@@ -33,9 +33,13 @@ import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -625,6 +629,17 @@ private fun ReaderAudioControls(
             color = HighContrastGray
         )
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            // Skip backward 10s
+            IconButton(
+                onClick = { controller.skipBackward() },
+                modifier = Modifier.testTag("reader_skip_back")
+            ) {
+                Icon(
+                    Icons.Default.Replay10,
+                    contentDescription = stringResource(R.string.player_skip_back_cd),
+                    modifier = Modifier.size(28.dp)
+                )
+            }
             IconButton(
                 onClick = {
                     if (playing) controller.pause()
@@ -639,6 +654,17 @@ private fun ReaderAudioControls(
                     modifier = Modifier.size(32.dp)
                 )
             }
+            // Skip forward 10s
+            IconButton(
+                onClick = { controller.skipForward() },
+                modifier = Modifier.testTag("reader_skip_forward")
+            ) {
+                Icon(
+                    Icons.Default.Forward10,
+                    contentDescription = stringResource(R.string.player_skip_forward_cd),
+                    modifier = Modifier.size(28.dp)
+                )
+            }
             Slider(
                 value = position.toFloat(),
                 onValueChange = { controller.seekTo(it.toInt()) },
@@ -651,7 +677,116 @@ private fun ReaderAudioControls(
                 color = HighContrastGray
             )
         }
+        // Advanced controls: speed + sleep timer
+        PlayerAdvancedControls(controller = controller)
     }
+}
+
+/**
+ * Speed selector and sleep timer row for the reader player.
+ */
+@Composable
+private fun PlayerAdvancedControls(controller: com.aistudio.mynaatnotebook.audio.PlaybackController) {
+    val speed by controller.playbackSpeed.collectAsStateWithLifecycle()
+    val sleepRemaining by controller.sleepTimerRemainingMs.collectAsStateWithLifecycle()
+    var showSleepDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Speed button: tap to cycle through speeds
+        TextButton(
+            onClick = { controller.cyclePlaybackSpeed() },
+            modifier = Modifier.testTag("reader_speed_btn")
+        ) {
+            Text(
+                text = "${if (speed == speed.toInt().toFloat()) speed.toInt().toString() else speed.toString()}x",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+        }
+        // Sleep timer button
+        TextButton(
+            onClick = { showSleepDialog = true },
+            modifier = Modifier.testTag("reader_sleep_timer_btn")
+        ) {
+            Icon(
+                Icons.Default.Bedtime,
+                contentDescription = stringResource(R.string.player_sleep_timer_cd),
+                modifier = Modifier.size(20.dp),
+                tint = if (sleepRemaining != null) MaterialTheme.colorScheme.primary
+                       else MaterialTheme.colorScheme.onBackground
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = sleepRemaining?.let { ms ->
+                    val mins = (ms / 60_000L).toInt()
+                    val secs = ((ms % 60_000L) / 1000L).toInt()
+                    "%d:%02d".format(mins, secs)
+                } ?: stringResource(R.string.player_sleep_timer_title),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+        }
+    }
+
+    if (showSleepDialog) {
+        SleepTimerDialog(
+            currentRemainingMs = sleepRemaining,
+            onSelect = { minutes ->
+                if (minutes <= 0) controller.cancelSleepTimer()
+                else controller.setSleepTimer(minutes)
+                showSleepDialog = false
+            },
+            onDismiss = { showSleepDialog = false }
+        )
+    }
+}
+
+/**
+ * Sleep timer duration picker dialog.
+ */
+@Composable
+private fun SleepTimerDialog(
+    currentRemainingMs: Long?,
+    onSelect: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val options = listOf(0, 5, 10, 15, 30, 45, 60)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.player_sleep_timer_title)) },
+        text = {
+            Column {
+                options.forEach { minutes ->
+                    val label = if (minutes == 0) stringResource(R.string.player_sleep_timer_off)
+                                else "$minutes min"
+                    TextButton(
+                        onClick = { onSelect(minutes) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = label,
+                            modifier = Modifier.fillMaxWidth(),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                }
+                if (currentRemainingMs != null) {
+                    Text(
+                        text = "Active: ${currentRemainingMs / 60_000L}m remaining",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = HighContrastGray,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = { }
+    )
 }
 
 @Composable
